@@ -3,6 +3,7 @@ using UnityEngine;
 using System.Linq;
 using UnityEngine.UI;
 using System.Collections;
+using TMPro;
 
 public class GameManager : MonoBehaviour
 {
@@ -17,17 +18,27 @@ public class GameManager : MonoBehaviour
     public GameObject cardPrefab;      // CardPrefab（Inspectorに割り当て）
     public Sprite cardBackSprite;      // 裏面画像
 
-    private HumanPlayer human;         // 自分プレイヤー
-    private List<CpuPlayer> cpuPlayers = new();  // CPU3人
+    private HumanPlayer human;          // 自分プレイヤー
+    private List<CpuPlayer> cpuPlayers = new(); // CPU3人
 
     public List<Card> lastPlayedCards = new List<Card>(); // 場の直前のカード
 
-    private int passCount = 0;                // 連続パス人数カウント
-    private int lastPlayedPlayerIndex = -1;   // 最後にカードを出したプレイヤー
+    private int passCount = 0;           // 連続パス人数カウント
+    private int lastPlayedPlayerIndex = -1; // 最後にカードを出したプレイヤー
 
     [SerializeField] private Button passButton;
 
-    private List<PlayerBase> players;  // ← 全プレイヤーまとめ用
+    private List<PlayerBase> players; // ← 全プレイヤーまとめ用
+
+    [SerializeField] private TextMeshProUGUI passMessageText; // ←パスのテキスト
+
+    private Queue<string> messageQueue = new Queue<string>(); // ← メッセージキュー
+    private bool isShowingMessage = false;
+
+    [SerializeField] private GameObject cardSlotPrefab;
+
+    private List<CardSlot> playerCardSlots = new List<CardSlot>();
+
 
     // ================================================
     // --- ターン管理用変数 ---
@@ -42,8 +53,6 @@ public class GameManager : MonoBehaviour
     // ゲーム開始時またはターン進行時に呼ばれる
     private void StartTurn()
     {
-        Debug.Log($"=== Turn {currentTurnIndex} start ===");
-
         // 🟢 パスボタンの状態を初期化（どのターンでも毎回制御）
         passButton.interactable = (currentTurnIndex == 0);
 
@@ -52,7 +61,11 @@ public class GameManager : MonoBehaviour
             // 自分のターン開始前に選択状態をリセット
             ResetPlayerSelection();
 
-            // 出せるカードを最新の場情報で再設定
+            // 💡【修正箇所】: 手札の枚数に合わせて CardSlot を再生成する処理を追加
+            // この処理が、手札の増減に合わせてUIの土台をリセットします。
+            CreatePlayerCardSlots(human.Hand.Count);
+
+            // 出せるカードを最新の場情報で再設定し、UIにカードを配置
             PopulatePlayerHand(human);
 
             isPlayerTurn = true;
@@ -80,7 +93,7 @@ public class GameManager : MonoBehaviour
         List<Card> cardsToPlay = cpu.SelectCards(cpu.HandCards);
         if (cardsToPlay == null || cardsToPlay.Count == 0)
         {
-            Debug.Log($"{cpu.Name} はパスしました");
+            // Debug.Log($"{cpu.Name} はパスしました");
             yield break;
         }
 
@@ -130,7 +143,7 @@ public class GameManager : MonoBehaviour
     private void ResetPlayerSelection()
     {
         // HumanPlayer 側の選択リストを空にする
-        human.ClearSelectedCards();     
+        human.ClearSelectedCards();
 
         // handAreaPlayer 内の CardView を全解除
         foreach (Transform child in handAreaPlayer)
@@ -142,7 +155,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        Debug.Log("カード選択状態をリセットしました。");
+        // Debug.Log("カード選択状態をリセットしました。");
     }
 
     private IEnumerator NextTurnDelay()
@@ -157,68 +170,164 @@ public class GameManager : MonoBehaviour
     private IEnumerator CpuPlayTurn(int cpuIndex)
     {
         var cpu = cpuPlayers[cpuIndex];
-        var handArea = cpuIndex switch
-        {
-            0 => handAreaCPU1,
-            1 => handAreaCPU2,
-            2 => handAreaCPU3,
-            _ => null
-        };
 
         yield return new WaitForSeconds(0.8f);
 
         if (cpu.Hand.Count == 0)
         {
-            Debug.Log($"{cpu.Name} はすでに上がっています。");
+            // Debug.Log($"{cpu.Name} はすでに上がっています。");
             EndTurn();
             yield break;
         }
 
-        // --- ① 場のカードの状態をチェック ---
-        List<Card> field = lastPlayedCards;
-        List<Card> playableCards = new();
+        // --- 出せるカードを関数化 ---
+        List<Card> playableCards = GetPlayableCardsForCpu(cpu, lastPlayedCards);
 
-        if (field == null || field.Count == 0)
-        {
-            // 場が空 → 何でも出せる
-            playableCards = cpu.Hand.OrderBy(c => c.Rank).Take(1).ToList();
-        }
-        else
-        {
-            int fieldCount = field.Count;
-            int fieldRank = field[0].Rank; // 同ランク前提
-                                           // CPUの手札から「場と同じ枚数＆より強いランク」のカードを探す
-            playableCards = cpu.Hand
-                .GroupBy(c => c.Rank)
-                .Where(g => g.Count() >= fieldCount && g.Key > fieldRank)
-                .OrderBy(g => g.Key)
-                .FirstOrDefault()?
-                .Take(fieldCount)
-                .ToList() ?? new List<Card>();
-        }
-
-        // --- ② 出せるカードがない場合はパス ---
         if (playableCards.Count == 0)
         {
+            EnqueueMessage($"{cpu.Name} はパスしました");
             Debug.Log($"{cpu.Name} はパスしました。");
             yield return new WaitForSeconds(0.8f);
             HandlePass();
             yield break;
         }
 
-        // --- ③ 出すカードをCPUの手札から削除 ---
+        // --- 出すカードを削除 ---
         foreach (var c in playableCards)
             cpu.Hand.Remove(c);
 
-        Debug.Log($"{cpu.Name} played: {string.Join(", ", playableCards.Select(c => $"{c.Suit} {c.Rank}"))}");
+        // Debug.Log($"{cpu.Name} played: {string.Join(", ", playableCards.Select(c => $"{c.Suit} {c.Rank}"))}");
 
-        // --- ④ 表示処理（共通アニメーション）---
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
-
-        // --- ⑤ 少し待って次のターンへ ---
         yield return new WaitForSeconds(0.8f);
         EndTurn();
     }
+
+    // ================================================
+    // --- CPUの出せるカード判定ロジック ---
+    // ================================================
+    private List<Card> GetPlayableCardsForCpu(CpuPlayer cpu, List<Card> field)
+    {
+        var hand = cpu.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
+
+        // --- 1. 場が空ならランダムで1枚 or 階段優先なども可 ---
+        if (field == null || field.Count == 0)
+        {
+            // 階段を優先的に狙う例
+            var stairs = FindStairSequences(hand);
+            if (stairs.Count > 0)
+            {
+                var chosen = stairs[Random.Range(0, stairs.Count)];
+                // Debug.Log($"{cpu.Name} は階段を選択: {string.Join(", ", chosen.Select(c => $"{c.Rank}"))}");
+                return chosen;
+            }
+
+            // それ以外は最小ランクの1枚
+            return new List<Card> { hand.First() };
+        }
+
+        // --- 2. 場が同ランクセットの場合 ---
+        bool isFieldStair = IsStair(field);
+        int fieldCount = field.Count;
+        int fieldRank = field[0].Rank;
+
+        if (!isFieldStair)
+        {
+            // 同ランク出しの場合
+            var candidates = hand
+                .GroupBy(c => c.Rank)
+                .Where(g => g.Count() >= fieldCount && g.Key > fieldRank)
+                .OrderBy(g => g.Key)
+                .FirstOrDefault();
+
+            return candidates?.Take(fieldCount).ToList() ?? new List<Card>();
+        }
+        else
+        {
+            // 階段出しの場合（場の階段より強い階段を探す）
+            var stairs = FindStairSequences(hand);
+            foreach (var seq in stairs)
+            {
+                if (seq.Count == fieldCount && seq.Last().Rank > field.Last().Rank)
+                    return seq;
+            }
+        }
+
+        return new List<Card>(); // 出せない
+    }
+
+    // ================================================
+    // --- 手札内から階段（連番）候補を探す ---
+    // ================================================
+    private List<List<Card>> FindStairSequences(List<Card> hand)
+    {
+        List<List<Card>> stairs = new();
+
+        var suits = hand.GroupBy(c => c.Suit);
+        foreach (var s in suits)
+        {
+            var suitCards = s.OrderBy(c => c.Rank).ToList();
+            List<Card> current = new();
+
+            for (int i = 0; i < suitCards.Count; i++)
+            {
+                if (current.Count == 0)
+                {
+                    current.Add(suitCards[i]);
+                }
+                else
+                {
+                    // 連番チェック
+                    if (suitCards[i].Rank == current.Last().Rank + 1)
+                    {
+                        current.Add(suitCards[i]);
+                    }
+                    else
+                    {
+                        if (current.Count >= 3) stairs.Add(new List<Card>(current));
+                        current.Clear();
+                        current.Add(suitCards[i]);
+                    }
+                }
+            }
+
+            if (current.Count >= 3)
+                stairs.Add(new List<Card>(current));
+        }
+
+        return stairs;
+    }
+
+    // ================================================
+    // --- 階段（連番）判定 ---
+    // ================================================
+    private bool IsStair(List<Card> cards)
+    {
+        if (cards == null || cards.Count < 3) return false;
+
+        // すべて同じスートか？
+        var suit = cards[0].Suit;
+        if (cards.Any(c => c.Suit != suit))
+            return false;
+
+        // ランク順に並べる
+        var sorted = cards.OrderBy(c => c.Rank).ToList();
+
+        // すべて同じランク（3カード等）の場合はfalse
+        if (sorted.All(c => c.Rank == sorted[0].Rank))
+            return false;
+
+        // 連番チェック
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            if (sorted[i].Rank != sorted[i - 1].Rank + 1)
+                return false;
+        }
+
+        return true;
+    }
+
+
 
     // 外部参照用
     public HumanPlayer humanPlayer => human;
@@ -226,14 +335,60 @@ public class GameManager : MonoBehaviour
     void Start()
     {
         InitPlayers();
+
+        if (cpuPlayers.Count > 0) cpuPlayers[0].handArea = handAreaCPU1;
+        if (cpuPlayers.Count > 1) cpuPlayers[1].handArea = handAreaCPU2;
+        if (cpuPlayers.Count > 2) cpuPlayers[2].handArea = handAreaCPU3;
+
+        human.handArea = handAreaPlayer;
+
         DealInitialCards();
+
+        // ✅ 先にスロットを生成する
+        CreatePlayerCardSlots(human.Hand.Count);
+
+        // ✅ その後に手札を配置
         PopulatePlayerHand(human);
-        StartTurn(); // ゲーム開始時に最初のターン（人間）を開始
+
+        StartTurn();
+
         passButton.onClick.AddListener(OnPassButton);
-        // ゲーム開始時にプレイヤーリストを構築
+
+        // ✅ 最後にプレイヤーリストを構築
         players = new List<PlayerBase>();
         players.Add(humanPlayer);
         players.AddRange(cpuPlayers);
+    }
+
+    // ================================
+    // 手札スロットを自動生成
+    // ================================
+
+    private void CreatePlayerCardSlots(int slotCount)
+    {
+        // 古いスロットを削除
+        foreach (Transform child in handAreaPlayer)
+        {
+            if (child.GetComponent<CardSlot>() != null)
+                Destroy(child.gameObject);
+        }
+
+        playerCardSlots.Clear();
+
+        // スロットを自動生成
+        float spacing = 50f; // カードの間隔
+        float startX = -(slotCount - 1) * spacing / 2f;
+
+        for (int i = 0; i < slotCount; i++)
+        {
+            var slotObj = Instantiate(cardSlotPrefab, handAreaPlayer);
+            var rect = slotObj.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(80, 120);
+            rect.anchoredPosition = new Vector2(startX + i * spacing, 0);
+            playerCardSlots.Add(slotObj.GetComponent<CardSlot>());
+        }
+
+        Debug.Log($"[CreatePlayerCardSlots] スロット生成: {playerCardSlots.Count}個");
     }
 
     // -------------------------------
@@ -310,32 +465,46 @@ public class GameManager : MonoBehaviour
     // 手札UI生成
     // -------------------------------
     public void PopulatePlayerHand(HumanPlayer player)
+{
+    Debug.Log($"[PopulatePlayerHand] 呼ばれた / 手札枚数: {player.Hand.Count}");
+
+    // 既存のカードを削除
+    foreach (Transform child in handAreaPlayer)
     {
-        foreach (Transform child in handAreaPlayer)
+        if (child.GetComponent<CardView>() != null)
             Destroy(child.gameObject);
-
-        player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
-
-        // 今場に出ているカード
-        var tableCards = lastPlayedCards;
-        var playableCards = player.GetPlayableCards(tableCards);
-
-        foreach (var card in player.Hand)
-        {
-            var go = Instantiate(cardPrefab, handAreaPlayer);
-            var cv = go.GetComponent<CardView>();
-            cv.backSprite = cardBackSprite;
-            cv.SetCard(card);
-
-            // 出せるかどうかを設定（半透明＆クリック無効対応）
-            bool canPlay = playableCards.Contains(card);
-            cv.SetPlayable(canPlay);
-        }
     }
 
-    // -------------------------------
-    // CPU手札を裏面で表示
-    // -------------------------------
+    // 手札をソート
+    player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
+
+    // 今場に出ているカード
+    var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
+    var playableCards = player.GetPlayableCards(tableCards);
+
+    for (int i = 0; i < player.Hand.Count; i++)
+    {
+        var card = player.Hand[i];
+
+        // ✅ 親を設定する際に「false」を明示してローカル座標を維持
+        var go = Instantiate(cardPrefab);
+        go.transform.SetParent(playerCardSlots[i].transform, false);
+
+        // ✅ 位置・スケール初期化（安全のため）
+        var rect = go.GetComponent<RectTransform>();
+        rect.anchoredPosition = Vector2.zero;
+        rect.localScale = Vector3.one;
+
+        // ✅ カード設定
+        var cv = go.GetComponent<CardView>();
+        cv.backSprite = cardBackSprite;
+        cv.SetCard(card);
+
+        bool canPlay = playableCards.Contains(card);
+        cv.SetPlayable(canPlay);
+    }
+}
+
     public void PopulateCpuHandAsBack(Transform cpuArea, int cardCount)
     {
         foreach (Transform child in cpuArea)
@@ -379,18 +548,18 @@ public class GameManager : MonoBehaviour
     {
         if (!isPlayerTurn)
         {
-            Debug.Log("今はあなたの番ではありません。");
+            // Debug.Log("今はあなたの番ではありません。");
             return;
         }
 
-        Debug.Log("Play button pressed");
+        // Debug.Log("Play button pressed");
 
         var played = human.SelectCards(human.Hand);
 
         // 何も選んでいない → パス扱い
         if (played == null || played.Count == 0)
         {
-            Debug.Log("あなたはパスしました。");
+            // Debug.Log("あなたはパスしました。");
             HandlePass();
             return;
         }
@@ -398,7 +567,7 @@ public class GameManager : MonoBehaviour
         // 出せるカードかチェック
         if (!human.CanPlaySelectedCards(lastPlayedCards))
         {
-            Debug.Log("この組み合わせでは出せません。");
+            // Debug.Log("この組み合わせでは出せません。");
             return;
         }
 
@@ -412,150 +581,153 @@ public class GameManager : MonoBehaviour
         // 人間のターン以外では押せない
         if (players[currentTurnIndex] != humanPlayer) return;
 
-        Debug.Log("あなたはパスしました。");
+        // Debug.Log("あなたはパスしました。");
         HandlePass();
     }
 
     // 場にカードを出すアニメーション（誰が出したか currentPlayer を受け取る）
     private IEnumerator DisplayPlayedCardsOnTable(PlayerBase currentPlayer, List<Card> played)
     {
-        // 既存の場を消さない（山にして積む）
         float spacing = 20f;
         int existingCards = tableArea.childCount;
         Vector3 basePos = tableArea.position;
         float startX = basePos.x - (played.Count - 1) * spacing / 2f;
 
-        // handArea の CardView を先に全取得（安全）
-        List<CardView> allCardViews = new List<CardView>();
-        // currentPlayer が human か cpu かで探索元を変える
-        Transform sourceArea = (currentPlayer is HumanPlayer) ? handAreaPlayer : currentPlayer.handArea;
-        if (sourceArea != null)
+        // === 出発元（手札エリア）を取得 ===
+        Transform sourceArea = null;
+        if (currentPlayer is HumanPlayer)
+            sourceArea = handAreaPlayer;
+        else if (currentPlayer == cpuPlayers[0])
+            sourceArea = handAreaCPU1;
+        else if (currentPlayer == cpuPlayers[1])
+            sourceArea = handAreaCPU2;
+        else if (currentPlayer == cpuPlayers[2])
+            sourceArea = handAreaCPU3;
+
+        if (sourceArea == null)
         {
-            foreach (Transform child in sourceArea)
-            {
-                var cv = child.GetComponent<CardView>();
-                if (cv != null)
-                    allCardViews.Add(cv);
-            }
-        }
-        else
-        {
-            // 万が一 handArea が null な場合は全シーン検索（保険）
-            foreach (var cv in FindObjectsOfType<CardView>())
-            {
-                allCardViews.Add(cv);
-            }
+            Debug.LogWarning("手札エリアが見つかりません: " + currentPlayer);
+            yield break;
         }
 
+        // --- 出すカードのViewを探す ---
+        List<CardView> allCardViews = sourceArea.GetComponentsInChildren<CardView>().ToList();
         var playedViews = new List<CardView>();
 
         for (int i = 0; i < played.Count; i++)
         {
             Card card = played[i];
-            // 手札内の CardView を探す（card equality を使って一致）
-            var cv = allCardViews.FirstOrDefault(v => v.CardData == card);
+            CardView cv = allCardViews.FirstOrDefault(v => v.CardData == card);
+
+            // CPU裏カード対応（裏面 → 表に変換）
+            if (cv == null && !(currentPlayer is HumanPlayer))
+            {
+                cv = allCardViews.FirstOrDefault(v => v.CardData == null);
+            }
+
             if (cv == null)
             {
-                // もし手札UIに直接対象が見つからなければ、シーン全体から探す（裏面カードなど）
-                cv = FindObjectsOfType<CardView>().FirstOrDefault(v => v.CardData == card || (v.CardData == null && v.IsFaceUp == false));
+                Debug.LogWarning($"カードビューが見つかりません: {card}");
+                continue;
             }
 
-            if (cv != null)
+            // === CPUカードを表向きにする ===
+            cv.SetCard(card);
+
+            // === 右端の位置を取得 ===
+            RectTransform rt = sourceArea as RectTransform;
+            Vector3 startPos = sourceArea.position;
+            if (rt != null && rt.childCount > 0)
             {
-                // 表にする
-                cv.SetCard(card);
-
-                // 一時的に Canvas直下へ移動してワールド座標を保つ
-                cv.transform.SetParent(tableArea.parent, true);
-
-                // サイズ：全員同じ最終サイズに合わせる（変更したければ分岐）
-                //cv.transform.localScale = Vector3.one * 2f;
-
-                // 目標位置（少しずらして重ねる）
-                Vector3 targetPos = new Vector3(startX + spacing * i, basePos.y + existingCards * 0.5f, basePos.z);
-
-                // アニメーション（MoveToは CardView にある IEnumerator）
-                yield return StartCoroutine(cv.MoveTo(targetPos, 0.35f));
-
-                playedViews.Add(cv);
+                var lastCard = rt.GetChild(rt.childCount - 1);
+                startPos = lastCard.position;
             }
-        }
 
-        // アニメ完了短待ち（すでに各 MoveTo を待っているが余裕みせる）
-        yield return new WaitForSeconds(0.05f);
+            // === アニメーション終了位置（場の配置位置） ===
+            Vector3 endPos = new Vector3(startX + spacing * i, basePos.y, basePos.z);
 
-        // 場の子に再設定して最終調整
-        foreach (var cv in playedViews)
-        {
-            if (cv == null) continue;
-
-            cv.transform.SetParent(tableArea, true);
-            cv.transform.localScale = Vector3.one * 2f; // 最終サイズ
-            float randomRot = Random.Range(-6f, 6f);
-            cv.transform.localRotation = Quaternion.Euler(0, 0, randomRot);
-            // Zをずらして重なりを表現
-            cv.transform.localPosition += new Vector3(0, 0, existingCards * -2f);
-        }
-
-        // --- 手札データとUIの整理（Human と CPU によって Hand から削除） ---
-        // human の場合は human.Hand にあるカードを削除
-        if (currentPlayer is HumanPlayer)
-        {
-            foreach (var c in played)
-                if (human.Hand.Contains(c)) human.Hand.Remove(c);
-
-            // handAreaPlayer 内の played な CardView を削除
-            RemovePlayedCardsFromUI(played);
-        }
-        else
-        {
-            // CPU 側は player.handArea 内の裏面カードオブジェクトを 1枚ずつ削除する方が簡単
-            // ここでは currentPlayer.handArea を使って、該当するカードを探して Destroy
-            foreach (var c in played)
+            // === 🔹 出す瞬間に手札から削除 ===
+            cv.transform.SetParent(tableArea.parent, true); // テーブル用に親を外す
+            if (!(currentPlayer is HumanPlayer))
             {
-                if (currentPlayer.handArea != null)
+                // CPUの手札から今のカードビューを削除
+                if (cv.transform.parent != null && cv.transform.parent == sourceArea)
                 {
-                    // 手札UIから CardView を探して削除（CardData が null の裏面カードが多い）
-                    Transform found = null;
-                    foreach (Transform child in currentPlayer.handArea)
+                    cv.transform.SetParent(tableArea.parent, true);
+                }
+
+                // 🔸ここで手札エリアから見た目を削除
+                if (sourceArea.childCount > 0)
+                {
+                    Transform removeTarget = null;
+                    foreach (Transform t in sourceArea)
                     {
-                        var cv = child.GetComponent<CardView>();
-                        if (cv != null)
+                        CardView tmp = t.GetComponent<CardView>();
+                        if (tmp != null && tmp.CardData == card)
                         {
-                            // 裏面で rank/suit を持たない場合は単純に削除数で管理する
-                            found = child;
+                            removeTarget = t;
                             break;
                         }
                     }
-                    if (found != null) Destroy(found.gameObject);
+                    if (removeTarget != null)
+                    {
+                        Destroy(removeTarget.gameObject); // ← 出す瞬間に消す！
+                    }
                 }
-                // CPUの内部Handからは既に呼び出し元で削除している想定
             }
+
+            // --- 移動アニメーション ---
+            float duration = 0.4f;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                cv.transform.position = Vector3.Lerp(startPos, endPos, elapsed / duration);
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+            cv.transform.position = endPos;
+
+            playedViews.Add(cv);
         }
 
+        // --- 少し間を置いて整列 ---
+        yield return new WaitForSeconds(0.05f);
+
+        // --- テーブル上に整列して置く ---
+        foreach (var cv in playedViews)
+        {
+            if (cv == null) continue;
+            cv.transform.SetParent(tableArea, true);
+            cv.transform.localScale = Vector3.one * 2f;
+            float randomRot = Random.Range(-6f, 6f);
+            cv.transform.localRotation = Quaternion.Euler(0, 0, randomRot);
+            cv.transform.localPosition += new Vector3(0, 0, existingCards * -2f);
+
+            cv.DisableInteraction();
+        }
+
+        // --- 手札から削除（Humanのみここで実行） ---
+        if (currentPlayer is HumanPlayer)
+        {
+            foreach (var c in played) human.Hand.Remove(c);
+            RemovePlayedCardsFromUI(played);
+        }
+
+        // --- 状態更新 ---
         lastPlayedCards = new List<Card>(played);
-
-        passCount = 0; // 出したら連続パス数リセット
+        passCount = 0;
         lastPlayedPlayerIndex = currentTurnIndex;
-
-        Debug.Log($"Displayed {played.Count} cards by {(currentPlayer is HumanPlayer ? "Human" : "CPU")}. Table now has {tableArea.childCount} children.");
-
-        yield break;
     }
+
+
 
 
     // 手札UIの中から、played に含まれるカード（CardData）を削除する。
     // ※ handAreaPlayer の子のみを対象にするため、場に移動済みのカードは削除されません。
     private void RemovePlayedCardsFromUI(List<Card> played)
     {
-        // 子オブジェクトを先にリスト化してから処理（foreach 中の親変更回避）
-        var cardViews = new List<CardView>();
-        foreach (Transform child in handAreaPlayer)
-        {
-            var cv = child.GetComponent<CardView>();
-            if (cv != null)
-                cardViews.Add(cv);
-        }
+        // handAreaPlayer 配下の全 CardView を取得（CardSlot 内も含む）
+        var cardViews = handAreaPlayer.GetComponentsInChildren<CardView>().ToList();
 
         foreach (var cv in cardViews)
         {
@@ -569,11 +741,13 @@ public class GameManager : MonoBehaviour
     private void HandlePass()
     {
         passCount++;
-        Debug.Log($"{currentTurnIndex}番目のプレイヤーがパス（連続{passCount}人目）");
+        // Debug.Log($"{currentTurnIndex}番目のプレイヤーがパス（連続{passCount}人目）");
 
-        if (passCount >= 3)
+        // 場を流す条件：自分以外全員がパスした
+        // つまり 3人が連続パス or 全員パスして自分に戻った時
+        if (passCount >= players.Count - 1)
         {
-            Debug.Log("3人連続パス！場を流します。");
+            // Debug.Log("全員パス！場を流します。");
             StartCoroutine(ClearTableAndRestart());
         }
         else
@@ -591,7 +765,7 @@ public class GameManager : MonoBehaviour
             Destroy(child.gameObject);
 
         lastPlayedCards.Clear();
-        Debug.Log("場が流れました！");
+        // Debug.Log("場が流れました！");
 
         passCount = 0;
 
@@ -604,6 +778,100 @@ public class GameManager : MonoBehaviour
         StartTurn();
     }
 
+    public IEnumerator ShowMessage(string message, float duration = 2f)
+    {
+        if (passMessageText == null)
+        {
+            Debug.LogWarning("passMessageText が未設定です。Canvas上のテキストをアサインしてください。");
+            yield break;
+        }
 
+        passMessageText.text = message;
+        passMessageText.gameObject.SetActive(true);
+
+        // フェードイン
+        CanvasGroup cg = passMessageText.GetComponent<CanvasGroup>();
+        if (cg == null) cg = passMessageText.gameObject.AddComponent<CanvasGroup>();
+        cg.alpha = 0f;
+        float t = 0f;
+        while (t < 0.3f)
+        {
+            cg.alpha = Mathf.Lerp(0, 1, t / 0.3f);
+            t += Time.deltaTime;
+            yield return null;
+        }
+        cg.alpha = 1f;
+
+        // 一定時間表示
+        yield return new WaitForSeconds(duration);
+
+        // フェードアウト
+        t = 0f;
+        while (t < 0.5f)
+        {
+            cg.alpha = Mathf.Lerp(1, 0, t / 0.5f);
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        passMessageText.gameObject.SetActive(false);
+    }
+
+    public void EnqueueMessage(string message)
+    {
+        messageQueue.Enqueue(message);
+        if (!isShowingMessage)
+            StartCoroutine(ProcessMessageQueue());
+    }
+
+    private IEnumerator ProcessMessageQueue()
+    {
+        isShowingMessage = true;
+
+        while (messageQueue.Count > 0)
+        {
+            string message = messageQueue.Dequeue();
+
+            if (passMessageText == null)
+            {
+                Debug.LogWarning("passMessageText が未設定です。");
+                yield break;
+            }
+
+            passMessageText.text = message;
+            passMessageText.gameObject.SetActive(true);
+
+            // CanvasGroup でフェード制御
+            CanvasGroup cg = passMessageText.GetComponent<CanvasGroup>();
+            if (cg == null) cg = passMessageText.gameObject.AddComponent<CanvasGroup>();
+            cg.alpha = 0f;
+
+            // フェードイン
+            float t = 0f;
+            while (t < 0.3f)
+            {
+                cg.alpha = Mathf.Lerp(0, 1, t / 0.3f);
+                t += Time.deltaTime;
+                yield return null;
+            }
+            cg.alpha = 1f;
+
+            // 表示保持（例：1.5秒）
+            yield return new WaitForSeconds(1.5f);
+
+            // フェードアウト
+            t = 0f;
+            while (t < 0.5f)
+            {
+                cg.alpha = Mathf.Lerp(1, 0, t / 0.5f);
+                t += Time.deltaTime;
+                yield return null;
+            }
+
+            passMessageText.gameObject.SetActive(false);
+        }
+
+        isShowingMessage = false;
+    }
 
 }

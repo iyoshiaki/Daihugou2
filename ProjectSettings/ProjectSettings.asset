@@ -711,11 +711,11 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
-  cloudProjectId: 4b53cebe-6d87-40c9-8ea9-5b9fdda82e23
+  cloudProjectId: a68a986e-9504-4887-94eb-db78cca6390e
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: "\u5927\u5BCC\u8C6A"
-  organizationId: kopoandms
+  projectName: daifugo
+  organizationId: sasaharaka
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

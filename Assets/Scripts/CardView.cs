@@ -1,4 +1,4 @@
-ï»¿using System.Collections;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -20,16 +20,16 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
 
     Vector3 initialLocalPos;
-    private HumanPlayer humanPlayer;  // ï¿½ï¿½ï¿½Ç‰ï¿½ï¿½Fï¿½Iï¿½ï¿½ï¿½Ô‚ï¿½nï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    private HumanPlayer humanPlayer;  // š’Ç‰ÁF‘I‘ğó‘Ô‚ğ“n‚·‘Šè
 
     void Awake()
     {
         if (cardImage == null) cardImage = GetComponent<Image>();
 
-        // ï¿½ï¿½ HumanPlayer ï¿½ï¿½Vï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Tï¿½ï¿½
+        // š HumanPlayer ‚ğƒV[ƒ““à‚©‚ç’T‚·
         GameManager gm = FindObjectOfType<GameManager>();
         if (gm != null)
-            humanPlayer = gm.humanPlayer; // GameManagerï¿½ï¿½ï¿½Ç—ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½HumanPlayerï¿½ï¿½æ“¾
+            humanPlayer = gm.humanPlayer; // GameManager‚ªŠÇ—‚µ‚Ä‚¢‚éHumanPlayer‚ğæ“¾
     }
     void Start()
     {
@@ -98,7 +98,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
         }
     }
 
-    // ï¿½Nï¿½ï¿½ï¿½bï¿½Nï¿½Å‘Iï¿½ï¿½iï¿½ï¿½Éƒ|ï¿½bï¿½vï¿½j
+    // ƒNƒŠƒbƒN‚Å‘I‘ğiã‚Éƒ|ƒbƒvj
     //public void OnPointerClick(PointerEventData eventData)
     //{
     //    ToggleSelect();
@@ -109,13 +109,13 @@ public class CardView : MonoBehaviour, IPointerClickHandler
         if (CardData == null) return;
 
         IsSelected = !IsSelected;
-        float targetOffsetY = IsSelected ? 25f : 0f; // ï¿½Iï¿½ï¿½ï¿½ï¿½ï¿½25ï¿½ï¿½ï¿½
+        float targetOffsetY = IsSelected ? 25f : 0f; // ‘I‘ğ‚É25ã‚É
 
-        // ï¿½Rï¿½ï¿½ï¿½[ï¿½`ï¿½ï¿½ï¿½ÅŠï¿½ï¿½ç‚©ï¿½ï¿½Yï¿½Ì‚İˆÚ“ï¿½
+        // ƒRƒ‹[ƒ`ƒ“‚ÅŠŠ‚ç‚©‚ÉY‚Ì‚İˆÚ“®
         if (moveCoroutine != null) StopCoroutine(moveCoroutine);
         moveCoroutine = StartCoroutine(MoveCardYOffset(targetOffsetY, 0.15f));
 
-        // HumanPlayerï¿½Ì‘Iï¿½ï¿½ï¿½ï¿½Xï¿½gï¿½É”ï¿½ï¿½f
+        // HumanPlayer‚Ì‘I‘ğƒŠƒXƒg‚É”½‰f
         if (humanPlayer != null)
         {
             if (IsSelected)
@@ -130,10 +130,10 @@ public class CardView : MonoBehaviour, IPointerClickHandler
         }
     }
 
-    // === ï¿½Jï¿½[ï¿½hï¿½ï¿½wï¿½ï¿½Ê’uï¿½ÖƒAï¿½jï¿½ï¿½ï¿½[ï¿½Vï¿½ï¿½ï¿½ï¿½ï¿½Ú“ï¿½ ===
+    // === ƒJ[ƒh‚ğw’èˆÊ’u‚ÖƒAƒjƒ[ƒVƒ‡ƒ“ˆÚ“® ===
     public IEnumerator MoveTo(Vector3 targetWorldPos, float duration)
     {
-        Vector3 start = transform.position; // ï¿½ï¿½ï¿½[ï¿½ï¿½ï¿½hï¿½ï¿½ï¿½Wï¿½Åæ“¾
+        Vector3 start = transform.position; // ƒ[ƒ‹ƒhÀ•W‚Åæ“¾
         float elapsed = 0;
         while (elapsed < duration)
         {
@@ -148,8 +148,8 @@ public class CardView : MonoBehaviour, IPointerClickHandler
     {
         IsSelected = value;
 
-        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú‚É”ï¿½ï¿½fï¿½ï¿½ï¿½é‚½ï¿½ß‚Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È‚ç‚±ï¿½ï¿½ï¿½ï¿½
-        // ï¿½ï¿½Fï¿½Iï¿½ï¿½ï¿½ï¿½Éï¿½ï¿½ï¿½ï¿½ï¿½É•ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ UI ï¿½È‚ï¿½
+        // ‚à‚µŒ©‚½–Ú‚É”½‰f‚·‚é‚½‚ß‚Ìˆ—‚ª‚ ‚é‚È‚ç‚±‚±‚Å
+        // —áF‘I‘ğ‚É­‚µã‚É•‚‚©‚¹‚é UI ‚È‚Ç
         transform.localPosition = new Vector3(
             transform.localPosition.x,
             value ? 30f : 0f,
@@ -164,15 +164,15 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
         if (canPlay)
         {
-            // ï¿½Êï¿½ÌFï¿½É–ß‚ï¿½
+            // ’Êí‚ÌF‚É–ß‚·
             image.color = Color.white;
             var cg = GetComponent<CanvasGroup>();
             if (cg != null) cg.blocksRaycasts = true;
         }
         else
         {
-            // ï¿½Oï¿½ï¿½ï¿½[ï¿½ï¿½ï¿½iï¿½Gï¿½ï¿½ï¿½â”ï¿½ï¿½ï¿½ÍŒï¿½ï¿½ï¿½ï¿½ï¿½j
-            image.color = new Color(0.6f, 0.6f, 0.6f, 1f); // ï¿½ï¿½ ï¿½ï¿½ï¿½é‚³ï¿½ï¿½ï¿½ï¿½OK
+            // ƒOƒŒ[‰»iŠG•¿‚â”š‚ÍŒ©‚¦‚éj
+            image.color = new Color(0.6f, 0.6f, 0.6f, 1f); // © –¾‚é‚³’²®OK
             var cg = GetComponent<CanvasGroup>();
             if (cg != null) cg.blocksRaycasts = false;
         }
@@ -206,25 +206,25 @@ public class CardView : MonoBehaviour, IPointerClickHandler
         transform.localPosition = endPos;
     }
 
-    // === ï¿½ï¿½Éoï¿½ï¿½ï¿½ï¿½ÍƒNï¿½ï¿½ï¿½bï¿½Nï¿½Eï¿½ï¿½ï¿½ì–³ï¿½ï¿½ï¿½ï¿½ ===
+    // === ê‚Éo‚½Œã‚ÍƒNƒŠƒbƒNE‘€ì–³Œø‰» ===
     public void DisableInteraction()
     {
-        // ï¿½Nï¿½ï¿½ï¿½bï¿½Nï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½iraycastï¿½ï¿½Õ’fï¿½j
+        // ƒNƒŠƒbƒN–³Œø‰»iraycast‚ğÕ’fj
         var cg = GetComponent<CanvasGroup>();
         if (cg == null) cg = gameObject.AddComponent<CanvasGroup>();
         cg.blocksRaycasts = false;
 
-        // ï¿½{ï¿½^ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î‘ï¿½ï¿½ì–³ï¿½ï¿½ï¿½ï¿½
+        // ƒ{ƒ^ƒ“‚ª‚ ‚ê‚Î‘€ì–³Œø‰»
         var button = GetComponent<Button>();
         if (button != null)
             button.interactable = false;
 
-        // Colliderï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î“ï¿½ï¿½ï¿½ï¿½è”»ï¿½ï¿½ğ–³Œï¿½ï¿½ï¿½
+        // Collider‚ª‚ ‚ê‚Î“–‚½‚è”»’è‚ğ–³Œø‰»
         var collider = GetComponent<Collider2D>();
         if (collider != null)
             collider.enabled = false;
 
-        // ï¿½ï¿½ï¿½ï¿½Iï¿½ï¿½Å‚ï¿½ï¿½È‚ï¿½ï¿½Ì‚Å‘Iï¿½ï¿½ï¿½ï¿½
+        // ‚à‚¤‘I‘ğ‚Å‚«‚È‚¢‚Ì‚Å‘I‘ğ‰ğœ
         IsSelected = false;
     }
 
@@ -233,7 +233,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        // ï¿½oï¿½ï¿½ï¿½È‚ï¿½ï¿½Jï¿½[ï¿½hï¿½È‚ç‰½ï¿½ï¿½ï¿½ï¿½È‚ï¿½
+        // o‚¹‚È‚¢ƒJ[ƒh‚È‚ç‰½‚à‚µ‚È‚¢
         if (!isPlayable) return;
 
         ToggleSelect();
