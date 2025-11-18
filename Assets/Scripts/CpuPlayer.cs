@@ -39,18 +39,18 @@ public class CpuPlayer : PlayerBase
         // =============================
         // 🔹 階段（3〜4枚）
         // =============================
-        // 同じスートごとにチェック
-        var suitGroups = Hand.GroupBy(c => c.Suit);
+        var suitGroups = Hand.Where(c => !c.IsJoker()).GroupBy(c => c.Suit);
+
         foreach (var suitGroup in suitGroups)
         {
             var sorted = suitGroup.OrderBy(c => c.Rank).ToList();
+
             for (int i = 0; i < sorted.Count - 2; i++)
             {
                 for (int len = 3; len <= 4 && i + len <= sorted.Count; len++)
                 {
                     var seq = sorted.GetRange(i, len);
 
-                    // 階段判定を利用
                     if (GetCardGroupType(seq) == CardGroupType.Stair &&
                         CanPlaySelectedCards(tableCards, seq))
                     {
@@ -61,13 +61,26 @@ public class CpuPlayer : PlayerBase
         }
 
         // =============================
+        // 🔹 Joker（Rank=0）の扱い
+        // =============================
+        // Joker 1枚出しは最強として追加
+        var joker = Hand.FirstOrDefault(c => c.IsJoker());
+        if (joker != null)
+        {
+            var singleJoker = new List<Card> { joker };
+            if (CanPlaySelectedCards(tableCards, singleJoker))
+            {
+                playableSets.Add(singleJoker);
+            }
+        }
+
+        // =============================
         // 🔹 出せるカードがない場合はパス
         // =============================
         if (playableSets.Count == 0)
         {
             Debug.Log($"{Name} はパスしました。");
 
-            // --- GameManagerを探してUIに表示 ---
             var gm = GameObject.FindObjectOfType<GameManager>();
             if (gm != null)
             {
@@ -79,10 +92,11 @@ public class CpuPlayer : PlayerBase
 
         // =============================
         // 🔹 出せる中から最も弱い組み合わせを選択
+        //     Joker は GetStrength() = 100 で最強扱い
         // =============================
         var best = playableSets
-            .OrderBy(set => set.Min(c => c.Rank))
-            .ThenBy(set => set.Count) // 同ランクなら少ない枚数を優先
+            .OrderBy(set => set.Min(c => c.GetStrength()))
+            .ThenBy(set => set.Count)
             .First();
 
         // =============================

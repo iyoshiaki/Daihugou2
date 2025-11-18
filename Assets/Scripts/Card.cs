@@ -6,8 +6,10 @@ public enum Suit
     Spade,
     Heart,
     Diamond,
-    Club
+    Club,
+    Joker
 }
+
 
 public class Card
 {
@@ -28,5 +30,22 @@ public class Card
     public override string ToString()
     {
         return $"{Suit}-{Rank}";
+    }
+    public bool IsJoker()
+    {
+        return Rank == 0;
+    }
+    public int GetStrength()
+    {
+        return IsJoker() ? 100 : Rank;
+    }
+    public static Card CreateJoker()
+    {
+        return new Card
+        {
+            Suit = Suit.Joker,
+            Rank = 99,                     // Joker の特殊ランク
+            SpritePath = "Cards/Joker"     // Joker 専用画像
+        };
     }
 }

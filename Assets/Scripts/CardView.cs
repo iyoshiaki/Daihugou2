@@ -39,8 +39,15 @@ public class CardView : MonoBehaviour, IPointerClickHandler
     public void SetCard(Card card)
     {
         CardData = card;
-        IsFaceUp = true;
-        UpdateSprite();
+
+        if (card.IsJoker())
+        {
+            cardImage.sprite = Resources.Load<Sprite>("Cards/Joker");
+            return;
+        }
+
+        // í èÌÇÃÉJÅ[Éh
+        cardImage.sprite = Resources.Load<Sprite>(card.SpritePath);
     }
 
     public void SetFaceDown()
