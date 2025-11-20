@@ -29,6 +29,7 @@ public class GameManager : MonoBehaviour
     private int lastPlayedPlayerIndex = -1;
 
     [SerializeField] private Button passButton;
+    [SerializeField] private Button playButton;
 
     private List<PlayerBase> players;
 
@@ -59,6 +60,8 @@ public class GameManager : MonoBehaviour
 
         if (currentTurnIndex == 0)
         {
+            if (playButton != null) playButton.interactable = true;
+
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
@@ -67,6 +70,8 @@ public class GameManager : MonoBehaviour
         }
         else
         {
+            if (playButton != null) playButton.interactable = false;
+
             isPlayerTurn = false;
             StartCoroutine(CpuPlayTurn(currentTurnIndex - 1));
         }
@@ -412,7 +417,8 @@ public class GameManager : MonoBehaviour
     {
         foreach (Transform child in cpuArea) Destroy(child.gameObject);
 
-        bool isSide = (cpuArea == handAreaCPU2 || cpuArea == handAreaCPU3);
+        bool isSide = (cpuArea == handAreaCPU1 || cpuArea == handAreaCPU3);
+        bool isCpu2 = (cpuArea == handAreaCPU2);
 
         for (int i = 0; i < cardCount; i++)
         {
@@ -426,9 +432,17 @@ public class GameManager : MonoBehaviour
                 var rect = go.GetComponent<RectTransform>();
                 rect.localRotation = Quaternion.Euler(0, 0, 90f);
             }
+            else if (isCpu2)
+            {
+                // CPU2 だけカードを縦向きにする
+                RectTransform rect = go.GetComponent<RectTransform>();
+                rect.localRotation = Quaternion.Euler(0, 0, 180f);
+            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(cpuArea.GetComponent<RectTransform>());
         }
-        LayoutRebuilder.ForceRebuildLayoutImmediate(cpuArea.GetComponent<RectTransform>());
     }
+
+
 
     private IEnumerator PlayerPlayRoutine(List<Card> played)
     {
@@ -436,23 +450,45 @@ public class GameManager : MonoBehaviour
         EndTurn();
     }
 
-    // Playボタン処理
     public void OnPlayButton()
     {
+        // 自分のターンでなければ無視
         if (!isPlayerTurn) return;
+
+        // ボタンが設定されており、すでに無効なら無視（連打防止）
+        if (playButton != null && !playButton.interactable) return;
+
+        // ▼ 変更: 押された瞬間にボタンを無効化（これで連打を防ぐ）
+        if (playButton != null) playButton.interactable = false;
 
         var played = human.SelectCards(human.Hand);
 
         if (played == null || played.Count == 0)
         {
-            HandlePass();
+            // 何も選択せずにPlayボタンを押した場合の挙動
+            // 元のコードではHandlePassしていましたが、一般的には「カードを選んでください」と戻すことが多いです。
+            // パス扱いにするならこのままでOKですが、選び直させるなら interactable = true に戻します。
+
+            // 今回は「選び直し」させる想定でロックを解除します
+            Debug.Log("カードが選択されていません。");
+            if (playButton != null) playButton.interactable = true;
             return;
         }
 
-        if (!human.CanPlaySelectedCards(lastPlayedCards)) return;
+        if (!human.CanPlaySelectedCards(lastPlayedCards))
+        {
+            Debug.Log("そのカードは出せません。");
+            // ▼ 追加: 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
+            if (playButton != null) playButton.interactable = true;
 
+            // 選択状態を解除などの処理が必要ならここに入れる
+            return;
+        }
+
+        // 成功した場合、ボタンは無効のまま処理を進める
         StartCoroutine(PlayerPlayRoutine(played));
     }
+
 
     //パスボタン処理
     private void OnPassButton()

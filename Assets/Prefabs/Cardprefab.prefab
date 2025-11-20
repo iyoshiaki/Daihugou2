@@ -123,5 +123,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cardImage: {fileID: 1424168016343238394}
-  backSprite: {fileID: 21300000, guid: a5fcdea9d0e78f1489b2b4bcf8ed48e0, type: 3}
+  backSprite: {fileID: 21300000, guid: 43598339bd85b814bb6bdf514145c000, type: 3}
   isPlayable: 1
