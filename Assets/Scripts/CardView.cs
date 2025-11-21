@@ -159,7 +159,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
         // ó·ÅFëIëéûÇ…è≠Çµè„Ç…ïÇÇ©ÇπÇÈ UI Ç»Ç«
         transform.localPosition = new Vector3(
             transform.localPosition.x,
-            value ? 30f : 0f,
+            value ? 25f : 0f,
             transform.localPosition.z
         );
     }

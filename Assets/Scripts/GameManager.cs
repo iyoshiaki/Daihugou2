@@ -298,6 +298,63 @@ public class GameManager : MonoBehaviour
         //特殊ルール
         rules.Add(new EightCutRule());
     }
+    void Update()
+    {
+        // ゲームが進行中でボタンの設定がある場合のみ実行
+        if (playButton != null && passButton != null)
+        {
+            UpdateButtonVisibility();
+        }
+    }
+
+    // ボタンの表示/非表示を管理するメソッド
+    private void UpdateButtonVisibility()
+    {
+        // 1. 自分のターンでない場合、両方隠す
+        if (!isPlayerTurn)
+        {
+            if (playButton != null) playButton.gameObject.SetActive(false);
+            if (passButton != null) passButton.gameObject.SetActive(false);
+            return;
+        }
+
+        // --- 以下、自分のターンの処理 ---
+
+        // 2. プレイボタンの制御
+        // 「表示させてよい」とのことなので、自分のターン中は常に表示(Active)にします
+        if (playButton != null)
+        {
+            playButton.gameObject.SetActive(true);
+
+            // 【オプション】もし「カードを選んでない時は押せない（グレー）」にしたいなら、
+            // 下の行のコメントアウト(//)を外して有効にしてください。
+            // playButton.interactable = IsAnyCardSelected();
+        }
+
+        // 3. パスボタンの制御
+        // 場にカードがない（null または 0枚）＝ 自分が親（最初に出す人）
+        // 親ならパスできないので非表示、それ以外（場にカードがある）なら表示
+        if (passButton != null)
+        {
+            bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
+            passButton.gameObject.SetActive(!isFieldEmpty);
+        }
+    }
+
+    // 手札の中に「選択状態」のカードがあるかチェックする
+    private bool IsAnyCardSelected()
+    {
+        foreach (Transform child in handAreaPlayer)
+        {
+            var cv = child.GetComponent<CardView>();
+            // 注意: CardViewスクリプトに IsSelected プロパティ(bool)がある前提です
+            if (cv != null && cv.IsSelected)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     // 手札スロットを自動生成
     private void CreatePlayerCardSlots(int slotCount)
@@ -602,6 +659,11 @@ public class GameManager : MonoBehaviour
 
         lastPlayedCards = new List<Card>(played);
 
+        // カードが出されたので、このプレイヤーを「最後に出した人」として記録
+        lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
+        // 新しいカードが出たので、これまでのパス回数はリセット
+        passCount = 0;
+
         // GameState を作る（ルールに渡す情報箱）
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
@@ -630,10 +692,14 @@ public class GameManager : MonoBehaviour
                 EnqueueMessage($"{currentPlayer.Name} の 8切り！場をリセットします。");
                 yield return new WaitForSeconds(0.6f);
 
-                // ★ 追加：次の人へ進まないようにする
+                // ★ 追加：次の人へ進まないようにするフラグを立てる
                 skipTurnAdvance = true;
 
-                StartTurn();
+                // 修正：ここでの StartTurn() は削除します。
+                // 理由：この後呼び出される EndTurn() 内で skipTurnAdvance フラグを見て
+                // 自動的に StartTurn() が呼ばれるため、ここで呼ぶと2重実行になります。
+                // StartTurn(); // ← この行を削除またはコメントアウト
+
                 yield break;
             }
         }
