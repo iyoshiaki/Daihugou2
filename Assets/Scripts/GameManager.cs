@@ -116,14 +116,17 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        // ★ 修正: ここでスキップ分も含めて計算する
         // 次のターン = (現在 + 1 + スキップ数) % 人数
         int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
 
         // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
         if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
         {
-            EnqueueMessage("全員スキップ！もう一度自分の番です。");
+            EnqueueMessage("全員スキップ！場が流れ、もう一度自分の番です。"); // メッセージ修正
+
+            // 全員スキップで自分に番が戻った場合、場を流して自分からスタート
+            StartCoroutine(ClearTableAndRestart());
+            return; // ターンを終了し、流す処理に任せる
         }
 
         currentTurnIndex = nextTurnIndex;
@@ -788,6 +791,21 @@ public class GameManager : MonoBehaviour
                 // ... (8切り処理) ...
                 skipTurnAdvance = true;
                 StartTurn();
+                yield break;
+            }
+        }
+        // スキップが予約されている場合、その人数分を passCount に加算する
+        // （スキップされた人数 = 出せなかった人数）と見なす
+        if (pendingSkipCount > 0)
+        {
+            // passCount にスキップ人数を加算
+            passCount += pendingSkipCount;
+
+            // もし加算後に場が流れる条件を満たしていたら、ここで場を流す処理を呼び出す
+            if (passCount >= players.Count - 1)
+            {
+                // 次の EndTurn() や NextTurnDelay() を呼ばずに、ここで終了する
+                StartCoroutine(ClearTableAndRestart());
                 yield break;
             }
         }
