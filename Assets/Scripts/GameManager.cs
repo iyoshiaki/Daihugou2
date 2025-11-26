@@ -110,9 +110,8 @@ public class GameManager : MonoBehaviour
         if (skipTurnAdvance)
         {
             skipTurnAdvance = false;
-            // 8切りの場合は pendingSkipCount もリセットしておく（念のため）
             pendingSkipCount = 0;
-            StartCoroutine(NextTurnDelay());
+            StartCoroutine(NextTurnDelay()); // ここで正しく「一度だけ」次のターン（自分）が始まります
             return;
         }
 
@@ -599,21 +598,40 @@ public class GameManager : MonoBehaviour
 
     private bool IsValidPlay(List<Card> hand, List<Card> selected, List<Card> field)
     {
-        // 1. 役として成立しているか（枚数、階段など）
-        //    -> 既存のロジックがあればそれを使う、あるいはここでチェック
-        if (selected.Count == 0) return false;
+        if (selected == null || selected.Count == 0) return false;
+
+        // --- 1. 自分の出したカード単体でのチェック（役になっているか？） ---
+
+        // A. 同じ数字の組み合わせか？（単体、ペア、3カードなど）
         bool isRankGroup = selected.All(c => c.Rank == selected[0].Rank);
 
-        // 2. 場に出ているカードより強いか
+        // B. 階段（同じマークで連番3枚以上）か？
+        // すでにクラス内に IsStair メソッドがあるのでそれを使います
+        bool isStair = IsStair(selected);
+
+        // ペアでも階段でもないバラバラなカードなら、場が空でも出せないようにする
+        if (!isRankGroup && !isStair)
+        {
+            return false;
+        }
+
+        // --- 2. 場に出ているカードとの比較（場にカードがある場合のみ） ---
         if (field != null && field.Count > 0)
         {
-            // 枚数チェック
+            // 枚数チェック (階段なら階段、ペアならペアで枚数が合っているか)
             if (selected.Count != field.Count) return false;
 
+            // タイプの整合性チェック（場が階段なのにペアを出そうとしていないか）
+            bool fieldIsStair = IsStair(field);
+            if (fieldIsStair != isStair) return false;
+
             // 強さチェック
+            // ※階段の場合は一番弱いカード同士、ペアの場合はその数字を比較
+            // ここでは簡易的に [0] を比較していますが、階段の革命対応など厳密にするなら調整が必要
             int fieldStrength = GetCardStrength(field[0].Rank);
             int selectedStrength = GetCardStrength(selected[0].Rank);
 
+            // 同じ強さ以下なら出せない（大富豪の基本ルール）
             if (selectedStrength <= fieldStrength) return false;
         }
 
@@ -770,7 +788,6 @@ public class GameManager : MonoBehaviour
         }
 
         // 3. 5飛ばし反映
-        // ★ 修正: ここで currentTurnIndex を直接いじらず、変数に保存するだけにする
         pendingSkipCount = state.SkipCount;
 
         if (pendingSkipCount > 0)
@@ -781,17 +798,28 @@ public class GameManager : MonoBehaviour
         // 4. 8切り & 場を流す処理
         if (state.TableCards == null || state.TableCards.Count == 0)
         {
-            // 場が流れたらスキップ効果は無効化（あるいはリセット）するのが一般的ですが、
-            // 8切りの場合はそもそも「俺のターン」になるのでスキップ関係なく自分の番です。
-            pendingSkipCount = 0; // リセット
+            // 場が流れたらスキップ効果は無効化
+            pendingSkipCount = 0;
             isTempRevolution = false;
 
             if (state.KeepTurn)
             {
-                // ... (8切り処理) ...
+                EnqueueMessage("8切り！");
+
+                // 1. 少し待機
+                yield return new WaitForSeconds(1.0f);
+
+                // 2. 画面上のカード削除
+                foreach (Transform child in tableArea) Destroy(child.gameObject);
+
+                // 3. 内部データリセット
+                lastPlayedCards.Clear();
+                passCount = 0;
+
+                // ターンを進めずに自分の番にするフラグを立てる
                 skipTurnAdvance = true;
-                StartTurn();
-                yield break;
+
+                yield break; // ここで抜けて EndTurn() に任せる
             }
         }
         // スキップが予約されている場合、その人数分を passCount に加算する
