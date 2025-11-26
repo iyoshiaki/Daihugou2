@@ -498,7 +498,7 @@ public class GameManager : MonoBehaviour
         player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
 
         var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
-        var playableCards = player.GetPlayableCards(tableCards);
+        var playableCards = GetLegalCardsForUI(player.Hand, tableCards);
 
         for (int i = 0; i < player.Hand.Count; i++)
         {
@@ -759,10 +759,6 @@ public class GameManager : MonoBehaviour
         // GameState を作る
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
-        // 全ルールをチェックして適用
-        // ★ 毎回リセットすべき一時フラグを初期化
-        isTempRevolution = false;
-
         foreach (var rule in rules)
         {
             if (rule.CanApply(played, state))
@@ -872,6 +868,8 @@ public class GameManager : MonoBehaviour
         lastPlayedCards.Clear();
         passCount = 0;
 
+        isTempRevolution = false; // 場が流れたら11バック終了
+
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
         currentTurnIndex = lastPlayedPlayerIndex;
@@ -973,5 +971,66 @@ public class GameManager : MonoBehaviour
     {
         if (played == null || played.Count == 0) return false;
         return played.Any(c => c.Rank == 8);
+    }
+    private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
+    {
+        // 1. 場が空なら、全て出せる（ことにしておく）
+        // ※本来は役成立チェックが必要ですが、UIハイライトとしては全点灯が一般的です
+        if (field == null || field.Count == 0)
+        {
+            return new List<Card>(hand);
+        }
+
+        List<Card> playable = new List<Card>();
+        int fieldCount = field.Count;
+
+        // 場の最強ランク（階段の場合は一番強いカード、ペア等は数字）
+        // ※階段の場合、簡易的に「一番強いランク」で比較します
+        int fieldStrongestRank = field.Max(c => c.Rank);
+        int fieldStrength = GetCardStrength(fieldStrongestRank);
+
+        bool isFieldStair = IsStair(field);
+
+        if (isFieldStair)
+        {
+            // --- 階段の場合 ---
+            // 手札から階段を探す
+            var stairs = FindStairSequences(hand);
+            foreach (var seq in stairs)
+            {
+                // 枚数が同じで、かつ マークも同じ必要がある（ローカルルールによるが一般的に）
+                if (seq.Count != fieldCount) continue;
+                if (seq[0].Suit != field[0].Suit) continue;
+
+                // 強さ比較
+                int seqStrongestRank = seq.Max(c => c.Rank);
+                if (GetCardStrength(seqStrongestRank) > fieldStrength)
+                {
+                    playable.AddRange(seq);
+                }
+            }
+        }
+        else
+        {
+            // --- 単体 または ペア/トリプルの場合 ---
+            // 手札をランクごとにグループ化
+            var groups = hand.GroupBy(c => c.Rank);
+
+            foreach (var g in groups)
+            {
+                // 枚数が足りているか
+                if (g.Count() >= fieldCount)
+                {
+                    // 強さが場より上か (革命・11バックを考慮した GetCardStrength を使用)
+                    if (GetCardStrength(g.Key) > fieldStrength)
+                    {
+                        // 条件を満たすランクのカードはすべて候補とする
+                        playable.AddRange(g);
+                    }
+                }
+            }
+        }
+
+        return playable;
     }
 }
