@@ -42,13 +42,24 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
         if (card.IsJoker())
         {
-            cardImage.sprite = Resources.Load<Sprite>("Cards/Joker");
+            cardImage.sprite = Resources.Load<Sprite>("Cards/card_empty");
+
+            // RectTransformを強制的に再計算させる
+            if (cardImage.rectTransform.parent != null)
+            {
+                // UnityのUIレイアウトを強制的に再構築
+                UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(
+                    cardImage.rectTransform.parent.GetComponent<RectTransform>()
+                );
+            }
+
             return;
         }
 
         // 通常のカード
         cardImage.sprite = Resources.Load<Sprite>(card.SpritePath);
     }
+
 
     public void SetFaceDown()
     {

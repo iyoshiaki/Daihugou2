@@ -460,7 +460,7 @@ public class GameManager : MonoBehaviour
         PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
     }
 
-    // デッキ生成（3～15 = 3〜K/A/2）
+    // デッキ生成（3～15 + Joker）
     List<Card> CreateDeck()
     {
         var deck = new List<Card>();
@@ -474,6 +474,8 @@ public class GameManager : MonoBehaviour
                     Rank = r,
                     SpritePath = $"Images/{s}s_{r}"
                 });
+        deck.Add(Card.CreateJoker());
+
         return deck;
     }
 
