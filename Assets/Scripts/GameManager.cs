@@ -691,53 +691,55 @@ public class GameManager : MonoBehaviour
 
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
-        if (realCards.Count + jokerCount < 3) return false;
+        int totalCards = realCards.Count + jokerCount;
+        // 階段は最低3枚必要
+        if (totalCards < 3) return false;
 
+        // 1. ジョーカーのみで3枚以上なら階段成立（特殊なケース）
         if (realCards.Count == 0)
         {
-            // ジョーカーのみで3枚以上なら階段（どのマーク、どのランクでも成立とみなす）
             return jokerCount >= 3;
         }
 
-        // リアルカードをランクでソート
-        var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
-
-        if (sortedRanks.Count == 0) return jokerCount >= 3;
-
-        // 階段のチェック
-        for (int i = 0; i < sortedRanks.Count; i++)
+        // 2. リアルカードのスートがすべて同じかチェック
+        if (realCards.Select(c => c.Suit).Distinct().Count() > 1)
         {
-            for (int j = i; j < sortedRanks.Count; j++)
-            {
-                int currentJokers = jokerCount;
-                int currentLength = 1;
-                int maxRank = sortedRanks[j];
-                int minRank = sortedRanks[i];
-
-                // リアルカードの間隔をジョーカーで埋められるかチェック
-                for (int k = i; k < j; k++)
-                {
-                    int requiredGap = sortedRanks[k + 1] - sortedRanks[k] - 1;
-                    if (requiredGap < 0) return false; // 重複がある場合はエラー（ただし Distinct で除去済みのはず）
-
-                    currentJokers -= requiredGap;
-                    if (currentJokers < 0) break; // ジョーカーが足りない
-                    currentLength += requiredGap + 1;
-                }
-
-                if (currentJokers >= 0)
-                {
-                    // ジョーカーが余っていても、合計で3枚以上の階段として成立するか
-                    int totalLength = (maxRank - minRank) + 1;
-                    if (totalLength + (jokerCount - currentJokers) >= 3)
-                    {
-                        return true;
-                    }
-                }
-            }
+            return false;
         }
 
-        return false;
+        // 3. リアルカードのランクを昇順かつ重複なしで取得 (※int型のリストとして取得できているか重要)
+        var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
+
+        // 4. リアルカードの間隔と、連番の合計長をチェック
+        int requiredJokers = 0;
+
+        // リアルカードの間隔に必要なジョーカー数を計算
+        for (int i = 0; i < sortedRanks.Count - 1; i++)
+        {
+            int gap = sortedRanks[i + 1] - sortedRanks[i] - 1;
+
+            if (gap < 0) return false;
+
+            requiredJokers += gap;
+        }
+
+        // 5. ジョーカーの枚数が、リアルカード間のギャップを埋めるのに十分か
+        if (jokerCount < requiredJokers)
+        {
+            return false; // ジョーカーが足りない
+        }
+
+        // 6. ギャップを埋めた後、残ったジョーカーで連番を伸ばす
+        int remainingJokers = jokerCount - requiredJokers;
+
+        // リアルカードだけでできている連番の長さ
+        int realStairLength = sortedRanks.Count;
+
+        // 合計の階段の長さ = (リアルカード数) + (ギャップを埋めたジョーカー数) + (残りで伸ばせるジョーカー数)
+        int finalStairLength = realStairLength + requiredJokers + remainingJokers;
+
+        // 7. 最終的な長さが3枚以上か
+        return finalStairLength >= 3;
     }
 
     private int GetStairMaxRank(List<Card> realCards, int jokerCount)
