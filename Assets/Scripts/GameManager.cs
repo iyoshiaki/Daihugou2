@@ -318,6 +318,13 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
+    private (List<Card> realCards, int jokerCount) GetRealCardsAndJokers(List<Card> cards)
+    {
+        var realCards = cards.Where(c => !c.IsJoker()).ToList();
+        int jokerCount = cards.Count - realCards.Count;
+        return (realCards, jokerCount);
+    }
+
     public HumanPlayer humanPlayer => human;
 
     void Start()
@@ -602,16 +609,33 @@ public class GameManager : MonoBehaviour
     {
         if (selected == null || selected.Count == 0) return false;
 
+        // 1. 選択されたカードをリアルカードとジョーカーに分ける
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
         // --- 1. 自分の出したカード単体でのチェック（役になっているか？） ---
 
-        // A. 同じ数字の組み合わせか？（単体、ペア、3カードなど）
-        bool isRankGroup = selected.All(c => c.Rank == selected[0].Rank);
+        bool isRankGroup = false;
+        bool isStair = false;
 
-        // B. 階段（同じマークで連番3枚以上）か？
-        // すでにクラス内に IsStair メソッドがあるのでそれを使います
-        bool isStair = IsStair(selected);
+        if (realSelected.Count == 0)
+        {
+            // ジョーカー単独出し（ワイルドカードとして有効）
+            // 場が空でなければ、ワイルドカードとして場の枚数と同じ枚数の組み合わせとみなす。
+            isRankGroup = (jokerCount > 0);
+        }
+        else
+        {
+            // A. 同じ数字の組み合わせか？（ジョーカーが補完できるか？）
+            // リアルカードのランクがすべて同じであれば、ジョーカーで補完可能。
+            isRankGroup = realSelected.All(c => c.Rank == realSelected[0].Rank);
 
-        // ペアでも階段でもないバラバラなカードなら、場が空でも出せないようにする
+            // B. 階段（ジョーカーが補完できるか？）
+            // ジョーカー込みの階段判定が必要
+            isStair = IsStairWithJoker(realSelected, jokerCount);
+        }
+
+
+        // ★ 修正点: ペアでも階段でもないバラバラなカードなら、場が空でも出せないようにする
         if (!isRankGroup && !isStair)
         {
             return false;
@@ -620,24 +644,123 @@ public class GameManager : MonoBehaviour
         // --- 2. 場に出ているカードとの比較（場にカードがある場合のみ） ---
         if (field != null && field.Count > 0)
         {
-            // 枚数チェック (階段なら階段、ペアならペアで枚数が合っているか)
+            // 枚数チェック
             if (selected.Count != field.Count) return false;
 
-            // タイプの整合性チェック（場が階段なのにペアを出そうとしていないか）
-            bool fieldIsStair = IsStair(field);
+            // 場のリアルカードとジョーカーに分ける
+            var (realField, fieldJokerCount) = GetRealCardsAndJokers(field);
+
+            // 場のタイプ判定
+            bool fieldIsStair = IsStairWithJoker(realField, fieldJokerCount);
+
+            // 場のタイプと出したカードのタイプが合っているか
             if (fieldIsStair != isStair) return false;
 
-            // 強さチェック
-            // ※階段の場合は一番弱いカード同士、ペアの場合はその数字を比較
-            // ここでは簡易的に [0] を比較していますが、階段の革命対応など厳密にするなら調整が必要
-            int fieldStrength = GetCardStrength(field[0].Rank);
-            int selectedStrength = GetCardStrength(selected[0].Rank);
 
-            // 同じ強さ以下なら出せない（大富豪の基本ルール）
+            // 強さチェック
+            int selectedStrongestRank;
+            int fieldStrongestRank;
+
+            if (isStair) // 階段の強さ比較
+            {
+                // 階段の強さ比較は、一番強いカードのランクで比較します。
+                // ジョーカーは「代わりになったカード」として評価する必要がありますが、
+                // 簡易的にリアルカードの最大ランク+ジョーカー枚数で強さを推定します。
+                selectedStrongestRank = GetStairMaxRank(realSelected, jokerCount);
+                fieldStrongestRank = GetStairMaxRank(realField, fieldJokerCount);
+            }
+            else // ペア・単体の強さ比較
+            {
+                // 場のランク（ジョーカーはリアルカードと同じランクとみなす）
+                fieldStrongestRank = realField.Count > 0 ? realField[0].Rank : 3; // 場がジョーカーのみなら3とみなす
+
+                // 出したカードのランク
+                selectedStrongestRank = realSelected.Count > 0 ? realSelected[0].Rank : 3; // 出したのがジョーカーのみなら3とみなす
+            }
+
+            // 最終的な強さ比較
+            int fieldStrength = GetCardStrength(fieldStrongestRank);
+            int selectedStrength = GetCardStrength(selectedStrongestRank);
+
+            // 同じ強さ以下なら出せない
             if (selectedStrength <= fieldStrength) return false;
         }
 
         return true;
+    }
+
+    private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
+    {
+        if (realCards.Count + jokerCount < 3) return false;
+
+        if (realCards.Count == 0)
+        {
+            // ジョーカーのみで3枚以上なら階段（どのマーク、どのランクでも成立とみなす）
+            return jokerCount >= 3;
+        }
+
+        // リアルカードをランクでソート
+        var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
+
+        if (sortedRanks.Count == 0) return jokerCount >= 3;
+
+        // 階段のチェック
+        for (int i = 0; i < sortedRanks.Count; i++)
+        {
+            for (int j = i; j < sortedRanks.Count; j++)
+            {
+                int currentJokers = jokerCount;
+                int currentLength = 1;
+                int maxRank = sortedRanks[j];
+                int minRank = sortedRanks[i];
+
+                // リアルカードの間隔をジョーカーで埋められるかチェック
+                for (int k = i; k < j; k++)
+                {
+                    int requiredGap = sortedRanks[k + 1] - sortedRanks[k] - 1;
+                    if (requiredGap < 0) return false; // 重複がある場合はエラー（ただし Distinct で除去済みのはず）
+
+                    currentJokers -= requiredGap;
+                    if (currentJokers < 0) break; // ジョーカーが足りない
+                    currentLength += requiredGap + 1;
+                }
+
+                if (currentJokers >= 0)
+                {
+                    // ジョーカーが余っていても、合計で3枚以上の階段として成立するか
+                    int totalLength = (maxRank - minRank) + 1;
+                    if (totalLength + (jokerCount - currentJokers) >= 3)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private int GetStairMaxRank(List<Card> realCards, int jokerCount)
+    {
+        if (realCards.Count == 0)
+        {
+            // ジョーカーのみの場合、とりあえず最強の2の代わりになったと仮定
+            // (この処理は厳密ではありませんが、2出しより強い階段はないため)
+            return 15;
+        }
+
+        // リアルカードの最大ランク
+        int maxRealRank = realCards.Max(c => c.Rank);
+
+        // ジョーカーの数が、リアルカードの最大ランクより上に連番を作れるだけあるか
+        // 例: (3, 4) + Joker2枚 の場合、(3, 4, 5, 6)となり、最大ランクは6
+
+        // リアルカードが連番の場合、ジョーカーの数だけ上に伸ばせる
+        var sortedRanks = realCards.OrderBy(c => c.Rank).ToList();
+
+        // 簡易的に、ジョーカーはすべて連番の「上」に繋がると仮定します
+        // （複雑な階段ロジックを避け、強さ比較の目的を果たすため）
+        return maxRealRank + jokerCount;
     }
 
 
