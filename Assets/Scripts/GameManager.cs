@@ -574,18 +574,14 @@ public class GameManager : MonoBehaviour
         // ボタンが設定されており、すでに無効なら無視（連打防止）
         if (playButton != null && !playButton.interactable) return;
 
-        // ▼ 変更: 押された瞬間にボタンを無効化（これで連打を防ぐ）
+        // 押された瞬間にボタンを無効化（これで連打を防ぐ）
         if (playButton != null) playButton.interactable = false;
 
         var played = human.SelectCards(human.Hand);
 
         if (played == null || played.Count == 0)
         {
-            // 何も選択せずにPlayボタンを押した場合の挙動
-            // 元のコードではHandlePassしていましたが、一般的には「カードを選んでください」と戻すことが多いです。
-            // パス扱いにするならこのままでOKですが、選び直させるなら interactable = true に戻します。
-
-            // 今回は「選び直し」させる想定でロックを解除します
+            // カードが選択されていません
             Debug.Log("カードが選択されていません。");
             if (playButton != null) playButton.interactable = true;
             return;
@@ -594,12 +590,13 @@ public class GameManager : MonoBehaviour
         if (!IsValidPlay(human.Hand, played, lastPlayedCards))
         {
             Debug.Log("そのカードは出せません。");
-            // ▼ 追加: 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
+            // 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
             if (playButton != null) playButton.interactable = true;
-
-            // 選択状態を解除などの処理が必要ならここに入れる
             return;
         }
+
+        // 場に出す前に、数字の小さい順（昇順）に並び替える
+        played = played.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
         // 成功した場合、ボタンは無効のまま処理を進める
         StartCoroutine(PlayerPlayRoutine(played));
