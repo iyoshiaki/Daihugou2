@@ -121,7 +121,7 @@ public class GameManager : MonoBehaviour
         // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
         if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
         {
-            EnqueueMessage("全員スキップ！場が流れ、もう一度自分の番です。"); // メッセージ修正
+            EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。"); // メッセージ修正
 
             // 全員スキップで自分に番が戻った場合、場を流して自分からスタート
             StartCoroutine(ClearTableAndRestart());
@@ -880,14 +880,17 @@ public class GameManager : MonoBehaviour
         // 新しいカードが出たので、これまでのパス回数はリセット
         passCount = 0;
 
+        List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
+
         // GameState を作る
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
         foreach (var rule in rules)
         {
-            if (rule.CanApply(played, state))
+            // ▼ 変更点: ここで played (生データ) ではなく effectivePlayedCards (変換後) を渡す
+            if (rule.CanApply(effectivePlayedCards, state))
             {
-                rule.Apply(played, state);
+                rule.Apply(effectivePlayedCards, state);
             }
         }
 
@@ -897,13 +900,14 @@ public class GameManager : MonoBehaviour
         if (state.TriggerRevolution)
         {
             isRevolution = !isRevolution; // 状態反転
-            string status = isRevolution ? "革命開始！" : "革命終了！";
+            string status = isRevolution ? "革命開始!" : "革命終了!";
             EnqueueMessage(status);
         }
 
         // 2. 11バック反映（場が流れるまで有効）
         if (state.IsElevenBack)
         {
+            EnqueueMessage("11バック!");
             isTempRevolution = true;
         }
 
@@ -912,7 +916,7 @@ public class GameManager : MonoBehaviour
 
         if (pendingSkipCount > 0)
         {
-            EnqueueMessage($"{pendingSkipCount}人飛ばし！");
+            EnqueueMessage($"{pendingSkipCount}人飛ばし");
         }
 
         // 4. 8切り & 場を流す処理
@@ -924,7 +928,7 @@ public class GameManager : MonoBehaviour
 
             if (state.KeepTurn)
             {
-                EnqueueMessage("8切り！");
+                EnqueueMessage("8切り!");
 
                 // 1. 少し待機
                 yield return new WaitForSeconds(1.0f);
@@ -1156,5 +1160,94 @@ public class GameManager : MonoBehaviour
         }
 
         return playable;
+    }
+
+    /// <summary>
+    /// ルール判定用に、ジョーカーを具体的なランクのカードに変換したリストを生成する
+    /// (例: [6, 7, Joker] -> [6, 7, 8])
+    /// </summary>
+    private List<Card> GetEffectivePlayedCards(List<Card> original)
+    {
+        if (original == null || original.Count == 0) return new List<Card>();
+
+        // リアルカード（ジョーカー以外）を抽出してソート
+        var realCards = original.Where(c => !c.IsJoker()).OrderBy(c => c.Rank).ToList();
+        int jokerCount = original.Count - realCards.Count;
+
+        // ジョーカーがない場合はコピーをそのまま返す
+        if (jokerCount == 0) return new List<Card>(original);
+
+        // ジョーカーのみの場合 (とりあえず最強カード扱いで処理、例: Rank 15=2)
+        if (realCards.Count == 0)
+        {
+            var list = new List<Card>();
+            for (int i = 0; i < jokerCount; i++)
+            {
+                // ここでは仮に最強の2(15)として扱います
+                list.Add(new Card { Rank = 15, Suit = Suit.Spade });
+            }
+            return list;
+        }
+
+        // --- A. ペア・トリプル等の判定 (実カードのランクが全て同じ) ---
+        bool isGroup = realCards.All(c => c.Rank == realCards[0].Rank);
+        if (isGroup)
+        {
+            var list = new List<Card>(realCards);
+            int rank = realCards[0].Rank;
+            // ジョーカーをそのランクのカードとして生成して追加
+            for (int i = 0; i < jokerCount; i++)
+            {
+                list.Add(new Card { Rank = rank, Suit = realCards[0].Suit });
+            }
+            return list;
+        }
+
+        // --- B. 階段の判定 (実カードが連番、または飛び番) ---
+        // 実カードの隙間を埋め、余ったら上に足す処理を行う
+        var effectiveList = new List<Card>();
+
+        // 最初のカード
+        int currentRank = realCards[0].Rank;
+        effectiveList.Add(realCards[0]);
+
+        int realIndex = 1;
+        int usedJokers = 0;
+
+        // 実カードの間をチェックして埋める
+        while (realIndex < realCards.Count)
+        {
+            int nextRealRank = realCards[realIndex].Rank;
+            int gap = nextRealRank - currentRank - 1;
+
+            if (gap > 0)
+            {
+                // ギャップをジョーカーで埋める
+                for (int k = 0; k < gap; k++)
+                {
+                    if (usedJokers < jokerCount)
+                    {
+                        currentRank++;
+                        effectiveList.Add(new Card { Rank = currentRank, Suit = realCards[0].Suit });
+                        usedJokers++;
+                    }
+                }
+            }
+
+            // 次の実カードを追加
+            currentRank = nextRealRank;
+            effectiveList.Add(realCards[realIndex]);
+            realIndex++;
+        }
+
+        // 余ったジョーカーは連番の「上」に足す (例: 6,7 + Joker -> 6,7,8)
+        while (usedJokers < jokerCount)
+        {
+            currentRank++;
+            effectiveList.Add(new Card { Rank = currentRank, Suit = realCards[0].Suit });
+            usedJokers++;
+        }
+
+        return effectiveList;
     }
 }

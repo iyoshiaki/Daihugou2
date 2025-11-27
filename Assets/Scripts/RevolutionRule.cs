@@ -12,6 +12,6 @@ public class RevolutionRule : IRule
     public void Apply(List<Card> playedCards, GameState state)
     {
         state.TriggerRevolution = true;
-        Debug.Log("ävñΩî≠ê∂ÅIã≠Ç≥Ç™îΩì]ÇµÇ‹Ç∑ÅB");
+        Debug.Log("ävñΩî≠ê∂!ã≠Ç≥Ç™îΩì]ÇµÇ‹Ç∑ÅB");
     }
 }

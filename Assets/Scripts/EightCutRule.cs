@@ -12,7 +12,7 @@ public class EightCutRule : IRule
 
     public void Apply(List<Card> playedCards, GameState state)
     {
-        Debug.Log("8Ø‚è”­“®I");
+        Debug.Log("8Ø‚è”­“®!");
 
         // ê‚ğ—¬‚·
         state.TableCards.Clear();
