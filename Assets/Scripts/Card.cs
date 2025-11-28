@@ -15,11 +15,10 @@ public class Card
 {
     public Suit Suit { get; set; }
     public int Rank { get; set; }
-    public string SpritePath { get; set; }   // 読み取り専用ではなく、代入可能に
+    public string SpritePath { get; set; }
 
     public Card() { }
 
-    // コンストラクタを使う場合用（任意）
     public Card(Suit suit, int rank)
     {
         Suit = suit;
@@ -33,19 +32,21 @@ public class Card
     }
     public bool IsJoker()
     {
-        return Rank == 0;
+        return Suit == Suit.Joker || Rank == 99;
     }
+
     public int GetStrength()
     {
         return IsJoker() ? 100 : Rank;
     }
+
     public static Card CreateJoker()
     {
         return new Card
         {
             Suit = Suit.Joker,
-            Rank = 99,                     // Joker の特殊ランク
-            SpritePath = "Cards/Joker"     // Joker 専用画像
+            Rank = 99,                     // 特殊ランクとして99を設定
+            SpritePath = "Cards/card_empty"     // Resources/Cards/Joker 画像が必要
         };
     }
 }

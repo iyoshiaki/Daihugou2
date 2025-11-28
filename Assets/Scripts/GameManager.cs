@@ -110,9 +110,8 @@ public class GameManager : MonoBehaviour
         if (skipTurnAdvance)
         {
             skipTurnAdvance = false;
-            // 8切りの場合は pendingSkipCount もリセットしておく（念のため）
             pendingSkipCount = 0;
-            StartCoroutine(NextTurnDelay());
+            StartCoroutine(NextTurnDelay()); // ここで正しく「一度だけ」次のターン（自分）が始まります
             return;
         }
 
@@ -122,7 +121,7 @@ public class GameManager : MonoBehaviour
         // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
         if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
         {
-            EnqueueMessage("全員スキップ！場が流れ、もう一度自分の番です。"); // メッセージ修正
+            EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。"); // メッセージ修正
 
             // 全員スキップで自分に番が戻った場合、場を流して自分からスタート
             StartCoroutine(ClearTableAndRestart());
@@ -319,6 +318,13 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
+    private (List<Card> realCards, int jokerCount) GetRealCardsAndJokers(List<Card> cards)
+    {
+        var realCards = cards.Where(c => !c.IsJoker()).ToList();
+        int jokerCount = cards.Count - realCards.Count;
+        return (realCards, jokerCount);
+    }
+
     public HumanPlayer humanPlayer => human;
 
     void Start()
@@ -461,7 +467,7 @@ public class GameManager : MonoBehaviour
         PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
     }
 
-    // デッキ生成（3～15 = 3〜K/A/2）
+    // デッキ生成（3～15 + Joker）
     List<Card> CreateDeck()
     {
         var deck = new List<Card>();
@@ -475,6 +481,8 @@ public class GameManager : MonoBehaviour
                     Rank = r,
                     SpritePath = $"Images/{s}s_{r}"
                 });
+        deck.Add(Card.CreateJoker());
+
         return deck;
     }
 
@@ -499,7 +507,7 @@ public class GameManager : MonoBehaviour
         player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
 
         var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
-        var playableCards = player.GetPlayableCards(tableCards);
+        var playableCards = GetLegalCardsForUI(player.Hand, tableCards);
 
         for (int i = 0; i < player.Hand.Count; i++)
         {
@@ -566,18 +574,14 @@ public class GameManager : MonoBehaviour
         // ボタンが設定されており、すでに無効なら無視（連打防止）
         if (playButton != null && !playButton.interactable) return;
 
-        // ▼ 変更: 押された瞬間にボタンを無効化（これで連打を防ぐ）
+        // 押された瞬間にボタンを無効化（これで連打を防ぐ）
         if (playButton != null) playButton.interactable = false;
 
         var played = human.SelectCards(human.Hand);
 
         if (played == null || played.Count == 0)
         {
-            // 何も選択せずにPlayボタンを押した場合の挙動
-            // 元のコードではHandlePassしていましたが、一般的には「カードを選んでください」と戻すことが多いです。
-            // パス扱いにするならこのままでOKですが、選び直させるなら interactable = true に戻します。
-
-            // 今回は「選び直し」させる想定でロックを解除します
+            // カードが選択されていません
             Debug.Log("カードが選択されていません。");
             if (playButton != null) playButton.interactable = true;
             return;
@@ -586,12 +590,13 @@ public class GameManager : MonoBehaviour
         if (!IsValidPlay(human.Hand, played, lastPlayedCards))
         {
             Debug.Log("そのカードは出せません。");
-            // ▼ 追加: 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
+            // 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
             if (playButton != null) playButton.interactable = true;
-
-            // 選択状態を解除などの処理が必要ならここに入れる
             return;
         }
+
+        // 場に出す前に、数字の小さい順（昇順）に並び替える
+        played = played.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
         // 成功した場合、ボタンは無効のまま処理を進める
         StartCoroutine(PlayerPlayRoutine(played));
@@ -599,25 +604,162 @@ public class GameManager : MonoBehaviour
 
     private bool IsValidPlay(List<Card> hand, List<Card> selected, List<Card> field)
     {
-        // 1. 役として成立しているか（枚数、階段など）
-        //    -> 既存のロジックがあればそれを使う、あるいはここでチェック
-        if (selected.Count == 0) return false;
-        bool isRankGroup = selected.All(c => c.Rank == selected[0].Rank);
+        if (selected == null || selected.Count == 0) return false;
 
-        // 2. 場に出ているカードより強いか
+        // 1. 選択されたカードをリアルカードとジョーカーに分ける
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        // --- 1. 自分の出したカード単体でのチェック（役になっているか？） ---
+
+        bool isRankGroup = false;
+        bool isStair = false;
+
+        if (realSelected.Count == 0)
+        {
+            // ジョーカー単独出し（ワイルドカードとして有効）
+            // 場が空でなければ、ワイルドカードとして場の枚数と同じ枚数の組み合わせとみなす。
+            isRankGroup = (jokerCount > 0);
+        }
+        else
+        {
+            // A. 同じ数字の組み合わせか？（ジョーカーが補完できるか？）
+            // リアルカードのランクがすべて同じであれば、ジョーカーで補完可能。
+            isRankGroup = realSelected.All(c => c.Rank == realSelected[0].Rank);
+
+            // B. 階段（ジョーカーが補完できるか？）
+            // ジョーカー込みの階段判定が必要
+            isStair = IsStairWithJoker(realSelected, jokerCount);
+        }
+
+
+        // ★ 修正点: ペアでも階段でもないバラバラなカードなら、場が空でも出せないようにする
+        if (!isRankGroup && !isStair)
+        {
+            return false;
+        }
+
+        // --- 2. 場に出ているカードとの比較（場にカードがある場合のみ） ---
         if (field != null && field.Count > 0)
         {
             // 枚数チェック
             if (selected.Count != field.Count) return false;
 
-            // 強さチェック
-            int fieldStrength = GetCardStrength(field[0].Rank);
-            int selectedStrength = GetCardStrength(selected[0].Rank);
+            // 場のリアルカードとジョーカーに分ける
+            var (realField, fieldJokerCount) = GetRealCardsAndJokers(field);
 
+            // 場のタイプ判定
+            bool fieldIsStair = IsStairWithJoker(realField, fieldJokerCount);
+
+            // 場のタイプと出したカードのタイプが合っているか
+            if (fieldIsStair != isStair) return false;
+
+
+            // 強さチェック
+            int selectedStrongestRank;
+            int fieldStrongestRank;
+
+            if (isStair) // 階段の強さ比較
+            {
+                // 階段の強さ比較は、一番強いカードのランクで比較します。
+                // ジョーカーは「代わりになったカード」として評価する必要がありますが、
+                // 簡易的にリアルカードの最大ランク+ジョーカー枚数で強さを推定します。
+                selectedStrongestRank = GetStairMaxRank(realSelected, jokerCount);
+                fieldStrongestRank = GetStairMaxRank(realField, fieldJokerCount);
+            }
+            else // ペア・単体の強さ比較
+            {
+                // 場のランク（ジョーカーはリアルカードと同じランクとみなす）
+                fieldStrongestRank = realField.Count > 0 ? realField[0].Rank : 3; // 場がジョーカーのみなら3とみなす
+
+                // 出したカードのランク
+                selectedStrongestRank = realSelected.Count > 0 ? realSelected[0].Rank : 3; // 出したのがジョーカーのみなら3とみなす
+            }
+
+            // 最終的な強さ比較
+            int fieldStrength = GetCardStrength(fieldStrongestRank);
+            int selectedStrength = GetCardStrength(selectedStrongestRank);
+
+            // 同じ強さ以下なら出せない
             if (selectedStrength <= fieldStrength) return false;
         }
 
         return true;
+    }
+
+    private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
+    {
+        int totalCards = realCards.Count + jokerCount;
+        // 階段は最低3枚必要
+        if (totalCards < 3) return false;
+
+        // 1. ジョーカーのみで3枚以上なら階段成立（特殊なケース）
+        if (realCards.Count == 0)
+        {
+            return jokerCount >= 3;
+        }
+
+        // 2. リアルカードのスートがすべて同じかチェック
+        if (realCards.Select(c => c.Suit).Distinct().Count() > 1)
+        {
+            return false;
+        }
+
+        // 3. リアルカードのランクを昇順かつ重複なしで取得 (※int型のリストとして取得できているか重要)
+        var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
+
+        // 4. リアルカードの間隔と、連番の合計長をチェック
+        int requiredJokers = 0;
+
+        // リアルカードの間隔に必要なジョーカー数を計算
+        for (int i = 0; i < sortedRanks.Count - 1; i++)
+        {
+            int gap = sortedRanks[i + 1] - sortedRanks[i] - 1;
+
+            if (gap < 0) return false;
+
+            requiredJokers += gap;
+        }
+
+        // 5. ジョーカーの枚数が、リアルカード間のギャップを埋めるのに十分か
+        if (jokerCount < requiredJokers)
+        {
+            return false; // ジョーカーが足りない
+        }
+
+        // 6. ギャップを埋めた後、残ったジョーカーで連番を伸ばす
+        int remainingJokers = jokerCount - requiredJokers;
+
+        // リアルカードだけでできている連番の長さ
+        int realStairLength = sortedRanks.Count;
+
+        // 合計の階段の長さ = (リアルカード数) + (ギャップを埋めたジョーカー数) + (残りで伸ばせるジョーカー数)
+        int finalStairLength = realStairLength + requiredJokers + remainingJokers;
+
+        // 7. 最終的な長さが3枚以上か
+        return finalStairLength >= 3;
+    }
+
+    private int GetStairMaxRank(List<Card> realCards, int jokerCount)
+    {
+        if (realCards.Count == 0)
+        {
+            // ジョーカーのみの場合、とりあえず最強の2の代わりになったと仮定
+            // (この処理は厳密ではありませんが、2出しより強い階段はないため)
+            return 15;
+        }
+
+        // リアルカードの最大ランク
+        int maxRealRank = realCards.Max(c => c.Rank);
+
+        // ジョーカーの数が、リアルカードの最大ランクより上に連番を作れるだけあるか
+        // 例: (3, 4) + Joker2枚 の場合、(3, 4, 5, 6)となり、最大ランクは6
+
+        // リアルカードが連番の場合、ジョーカーの数だけ上に伸ばせる
+        var sortedRanks = realCards.OrderBy(c => c.Rank).ToList();
+
+        // 簡易的に、ジョーカーはすべて連番の「上」に繋がると仮定します
+        // （複雑な階段ロジックを避け、強さ比較の目的を果たすため）
+        return maxRealRank + jokerCount;
     }
 
 
@@ -738,18 +880,17 @@ public class GameManager : MonoBehaviour
         // 新しいカードが出たので、これまでのパス回数はリセット
         passCount = 0;
 
+        List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
+
         // GameState を作る
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
-        // 全ルールをチェックして適用
-        // ★ 毎回リセットすべき一時フラグを初期化
-        isTempRevolution = false;
-
         foreach (var rule in rules)
         {
-            if (rule.CanApply(played, state))
+            // ▼ 変更点: ここで played (生データ) ではなく effectivePlayedCards (変換後) を渡す
+            if (rule.CanApply(effectivePlayedCards, state))
             {
-                rule.Apply(played, state);
+                rule.Apply(effectivePlayedCards, state);
             }
         }
 
@@ -759,39 +900,50 @@ public class GameManager : MonoBehaviour
         if (state.TriggerRevolution)
         {
             isRevolution = !isRevolution; // 状態反転
-            string status = isRevolution ? "革命開始！" : "革命終了！";
+            string status = isRevolution ? "革命開始!" : "革命終了!";
             EnqueueMessage(status);
         }
 
         // 2. 11バック反映（場が流れるまで有効）
         if (state.IsElevenBack)
         {
+            EnqueueMessage("11バック!");
             isTempRevolution = true;
         }
 
         // 3. 5飛ばし反映
-        // ★ 修正: ここで currentTurnIndex を直接いじらず、変数に保存するだけにする
         pendingSkipCount = state.SkipCount;
 
         if (pendingSkipCount > 0)
         {
-            EnqueueMessage($"{pendingSkipCount}人飛ばし！");
+            EnqueueMessage($"{pendingSkipCount}人飛ばし");
         }
 
         // 4. 8切り & 場を流す処理
         if (state.TableCards == null || state.TableCards.Count == 0)
         {
-            // 場が流れたらスキップ効果は無効化（あるいはリセット）するのが一般的ですが、
-            // 8切りの場合はそもそも「俺のターン」になるのでスキップ関係なく自分の番です。
-            pendingSkipCount = 0; // リセット
+            // 場が流れたらスキップ効果は無効化
+            pendingSkipCount = 0;
             isTempRevolution = false;
 
             if (state.KeepTurn)
             {
-                // ... (8切り処理) ...
+                EnqueueMessage("8切り!");
+
+                // 1. 少し待機
+                yield return new WaitForSeconds(1.0f);
+
+                // 2. 画面上のカード削除
+                foreach (Transform child in tableArea) Destroy(child.gameObject);
+
+                // 3. 内部データリセット
+                lastPlayedCards.Clear();
+                passCount = 0;
+
+                // ターンを進めずに自分の番にするフラグを立てる
                 skipTurnAdvance = true;
-                StartTurn();
-                yield break;
+
+                yield break; // ここで抜けて EndTurn() に任せる
             }
         }
         // スキップが予約されている場合、その人数分を passCount に加算する
@@ -843,6 +995,8 @@ public class GameManager : MonoBehaviour
 
         lastPlayedCards.Clear();
         passCount = 0;
+
+        isTempRevolution = false; // 場が流れたら11バック終了
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
@@ -945,5 +1099,155 @@ public class GameManager : MonoBehaviour
     {
         if (played == null || played.Count == 0) return false;
         return played.Any(c => c.Rank == 8);
+    }
+    private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
+    {
+        // 1. 場が空なら、全て出せる（ことにしておく）
+        // ※本来は役成立チェックが必要ですが、UIハイライトとしては全点灯が一般的です
+        if (field == null || field.Count == 0)
+        {
+            return new List<Card>(hand);
+        }
+
+        List<Card> playable = new List<Card>();
+        int fieldCount = field.Count;
+
+        // 場の最強ランク（階段の場合は一番強いカード、ペア等は数字）
+        // ※階段の場合、簡易的に「一番強いランク」で比較します
+        int fieldStrongestRank = field.Max(c => c.Rank);
+        int fieldStrength = GetCardStrength(fieldStrongestRank);
+
+        bool isFieldStair = IsStair(field);
+
+        if (isFieldStair)
+        {
+            // --- 階段の場合 ---
+            // 手札から階段を探す
+            var stairs = FindStairSequences(hand);
+            foreach (var seq in stairs)
+            {
+                // 枚数が同じで、かつ マークも同じ必要がある（ローカルルールによるが一般的に）
+                if (seq.Count != fieldCount) continue;
+                if (seq[0].Suit != field[0].Suit) continue;
+
+                // 強さ比較
+                int seqStrongestRank = seq.Max(c => c.Rank);
+                if (GetCardStrength(seqStrongestRank) > fieldStrength)
+                {
+                    playable.AddRange(seq);
+                }
+            }
+        }
+        else
+        {
+            // --- 単体 または ペア/トリプルの場合 ---
+            // 手札をランクごとにグループ化
+            var groups = hand.GroupBy(c => c.Rank);
+
+            foreach (var g in groups)
+            {
+                // 枚数が足りているか
+                if (g.Count() >= fieldCount)
+                {
+                    // 強さが場より上か (革命・11バックを考慮した GetCardStrength を使用)
+                    if (GetCardStrength(g.Key) > fieldStrength)
+                    {
+                        // 条件を満たすランクのカードはすべて候補とする
+                        playable.AddRange(g);
+                    }
+                }
+            }
+        }
+
+        return playable;
+    }
+
+    /// <summary>
+    /// ルール判定用に、ジョーカーを具体的なランクのカードに変換したリストを生成する
+    /// (例: [6, 7, Joker] -> [6, 7, 8])
+    /// </summary>
+    private List<Card> GetEffectivePlayedCards(List<Card> original)
+    {
+        if (original == null || original.Count == 0) return new List<Card>();
+
+        // リアルカード（ジョーカー以外）を抽出してソート
+        var realCards = original.Where(c => !c.IsJoker()).OrderBy(c => c.Rank).ToList();
+        int jokerCount = original.Count - realCards.Count;
+
+        // ジョーカーがない場合はコピーをそのまま返す
+        if (jokerCount == 0) return new List<Card>(original);
+
+        // ジョーカーのみの場合 (とりあえず最強カード扱いで処理、例: Rank 15=2)
+        if (realCards.Count == 0)
+        {
+            var list = new List<Card>();
+            for (int i = 0; i < jokerCount; i++)
+            {
+                // ここでは仮に最強の2(15)として扱います
+                list.Add(new Card { Rank = 15, Suit = Suit.Spade });
+            }
+            return list;
+        }
+
+        // --- A. ペア・トリプル等の判定 (実カードのランクが全て同じ) ---
+        bool isGroup = realCards.All(c => c.Rank == realCards[0].Rank);
+        if (isGroup)
+        {
+            var list = new List<Card>(realCards);
+            int rank = realCards[0].Rank;
+            // ジョーカーをそのランクのカードとして生成して追加
+            for (int i = 0; i < jokerCount; i++)
+            {
+                list.Add(new Card { Rank = rank, Suit = realCards[0].Suit });
+            }
+            return list;
+        }
+
+        // --- B. 階段の判定 (実カードが連番、または飛び番) ---
+        // 実カードの隙間を埋め、余ったら上に足す処理を行う
+        var effectiveList = new List<Card>();
+
+        // 最初のカード
+        int currentRank = realCards[0].Rank;
+        effectiveList.Add(realCards[0]);
+
+        int realIndex = 1;
+        int usedJokers = 0;
+
+        // 実カードの間をチェックして埋める
+        while (realIndex < realCards.Count)
+        {
+            int nextRealRank = realCards[realIndex].Rank;
+            int gap = nextRealRank - currentRank - 1;
+
+            if (gap > 0)
+            {
+                // ギャップをジョーカーで埋める
+                for (int k = 0; k < gap; k++)
+                {
+                    if (usedJokers < jokerCount)
+                    {
+                        currentRank++;
+                        effectiveList.Add(new Card { Rank = currentRank, Suit = realCards[0].Suit });
+                        usedJokers++;
+                    }
+                }
+            }
+
+            // 次の実カードを追加
+            currentRank = nextRealRank;
+            effectiveList.Add(realCards[realIndex]);
+            realIndex++;
+        }
+
+        // 余ったジョーカーは連番の「上」に足す (例: 6,7 + Joker -> 6,7,8)
+        while (usedJokers < jokerCount)
+        {
+            currentRank++;
+            effectiveList.Add(new Card { Rank = currentRank, Suit = realCards[0].Suit });
+            usedJokers++;
+        }
+
+        return effectiveList;
     }
 }
