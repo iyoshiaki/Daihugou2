@@ -7,9 +7,33 @@ public class SceneChanger : MonoBehaviour
 {
 
     // 「みんなで遊ぶ」ボタンを押したときに呼ぶ関数
-    public void GoToMinnaDe()
+    public void GoToMinnaDe(string minnade)
     {
         SceneManager.LoadScene("minnade");
+    }
+
+    // 「ルール設定」ボタンを押したときに呼ぶ関数
+    public void GoToRulesettings(string Rulesettings)
+    {
+        SceneManager.LoadScene("Rulesettings");
+    }
+
+    // 「対戦」ボタンを押したときに呼ぶ関数
+    public void GoTomodesentaku(string modesentaku)
+    {
+        SceneManager.LoadScene("modesentaku");
+    }
+
+    // モード選択画面、ルール設定画面の「戻る」ボタンを押したときに呼ぶ関数
+    public void BackTotitle()
+    {
+        SceneManager.LoadScene("title");
+    }
+
+    // みんなで画面の「戻る」ボタンを押したときに呼ぶ関数
+    public void BackTomodesentaku()
+    {
+        SceneManager.LoadScene("modesentaku");
     }
 
     // Start is called before the first frame update
