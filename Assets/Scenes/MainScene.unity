@@ -611,9 +611,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   handAreaPlayer: {fileID: 2080269570}
-  handAreaCPU1: {fileID: 1411355588}
+  handAreaCPU1: {fileID: 528872504}
   handAreaCPU2: {fileID: 1192306339}
-  handAreaCPU3: {fileID: 528872504}
+  handAreaCPU3: {fileID: 1411355588}
   tableArea: {fileID: 2041843496}
   cardPrefab: {fileID: 4073069442781677565, guid: 6e317a0596cb2164193200f4da1fa43f, type: 3}
   cardBackSprite: {fileID: 21300000, guid: 43598339bd85b814bb6bdf514145c000, type: 3}
@@ -961,8 +961,8 @@ MonoBehaviour:
 
 '
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: c84551f5c194ee84480e0cc2d4b5f99f, type: 2}
+  m_sharedMaterial: {fileID: 6766138776719388504, guid: c84551f5c194ee84480e0cc2d4b5f99f, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []

@@ -20,7 +20,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
 
     Vector3 initialLocalPos;
-    private HumanPlayer humanPlayer;  // ★追加：選択状態を渡す相手
+    public HumanPlayer humanPlayer;  // ★追加：選択状態を渡す相手
 
     void Awake()
     {
