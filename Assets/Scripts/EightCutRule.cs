@@ -6,19 +6,14 @@ public class EightCutRule : IRule
 {
     public bool CanApply(List<Card> playedCards, GameState state)
     {
-        // playedCards のどれかが 8 を含んでいれば 8切り発動
         return playedCards.Any(c => c.Rank == 8);
     }
 
     public void Apply(List<Card> playedCards, GameState state)
     {
-        Debug.Log("8切り発動!");
-
-        // 場を流す
-        state.TableCards.Clear();
-
-        // ★ 自分の番を継続
-        state.KeepTurn = true;
+        Debug.Log("8切りルール適用");
+        state.IsEightCut = true; // フラグを立てる
+        state.KeepTurn = true;   // ずっと俺のターン
+        state.TableCards.Clear(); // 論理的な場を空にする
     }
 }
-
