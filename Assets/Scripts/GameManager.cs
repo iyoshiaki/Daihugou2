@@ -369,7 +369,9 @@ public class GameManager : MonoBehaviour
         rules.Add(new EightCutRule());
         rules.Add(new RevolutionRule()); 
         rules.Add(new ElevenBackRule()); 
-        rules.Add(new FiveSkipRule());   
+        rules.Add(new FiveSkipRule());
+        rules.Add(new SevenPassRule());
+        rules.Add(new TenDiscardRule());
     }
     void Update()
     {
@@ -977,81 +979,68 @@ public class GameManager : MonoBehaviour
         }
 
         lastPlayedCards = new List<Card>(played);
-
-        // カードが出されたので、このプレイヤーを「最後に出した人」として記録
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
-        // 新しいカードが出たので、これまでのパス回数はリセット
         passCount = 0;
 
-        // ジョーカーを具体的なランクに変換
+        // 1. GameState作成とルールの適用
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
-
-        // GameState を作る
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
         foreach (var rule in rules)
         {
-            // ここで played (生データ) ではなく effectivePlayedCards (変換後) を渡す
             if (rule.CanApply(effectivePlayedCards, state))
             {
                 rule.Apply(effectivePlayedCards, state);
             }
         }
 
-        // --- ルール適用結果の反映 ---
+        // 2. ルール適用結果に基づいて演出とゲーム進行を制御
 
-        // 1. 革命反映
+        // --- 革命 ---
         if (state.TriggerRevolution)
         {
-            isRevolution = !isRevolution; // 状態反転
-            string status = isRevolution ? "革命開始!" : "革命終了!";
-            EnqueueMessage(status);
+            isRevolution = !isRevolution;
+            EnqueueMessage(isRevolution ? "革命開始!" : "革命終了!");
         }
 
-        // 2. 11バック反映（場が流れるまで有効）
+        // --- 11バック ---
         if (state.IsElevenBack)
         {
             EnqueueMessage("11バック!");
             isTempRevolution = true;
         }
 
-        // 3. 5飛ばし反映
+        // --- 5飛ばし ---
         pendingSkipCount = state.SkipCount;
-
         if (pendingSkipCount > 0)
         {
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
-        // 4. 8切り & 場を流す処理
-        if (state.TableCards == null || state.TableCards.Count == 0)
+        // --- 8切り ---
+        // さっき修正した state.IsEightCut フラグを見る
+        if (state.IsEightCut)
         {
-            // 場が流れたらスキップ効果は無効化
+            EnqueueMessage("8切り!");
+
+            // 場を流す処理
+            yield return new WaitForSeconds(1.0f);
+            foreach (Transform child in tableArea) Destroy(child.gameObject);
+            lastPlayedCards.Clear();
+            passCount = 0;
+
+            // スキップなどを無効化
             pendingSkipCount = 0;
             isTempRevolution = false;
 
             if (state.KeepTurn)
             {
-                EnqueueMessage("8切り!");
-
-                // 1. 少し待機
-                yield return new WaitForSeconds(1.0f);
-
-                // 2. 画面上のカード削除
-                foreach (Transform child in tableArea) Destroy(child.gameObject);
-
-                // 3. 内部データリセット
-                lastPlayedCards.Clear();
-                passCount = 0;
-
-                // ターンを進めずに自分の番にするフラグを立てる
-                skipTurnAdvance = true;
-
-                yield break; // ここで抜けて EndTurn() に任せる
+                skipTurnAdvance = true; // ターンを進めない
+                yield break; // ここで抜けて EndTurn() へ
             }
         }
 
-        // スキップが予約されている場合、その人数分を passCount に加算する
+        // スキップ処理 (8切りじゃなかった場合)
         if (pendingSkipCount > 0)
         {
             passCount += pendingSkipCount;
@@ -1062,29 +1051,28 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // 5. 7渡し判定 (ランク7が含まれている枚数分)
-        int sevenCount = effectivePlayedCards.Count(c => c.Rank == 7);
-
-        // 6. 10捨て判定 (ランク10が含まれている枚数分)
-        int tenCount = effectivePlayedCards.Count(c => c.Rank == 10);
-
-        if (sevenCount > 0)
+        // --- 7渡し ---
+        // 手動計算をやめて state.SevenPassCount を見る
+        if (state.SevenPassCount > 0)
         {
-            Debug.Log($"7渡し発動: {sevenCount}枚");
+            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
             skipTurnAdvance = true;
             isSevenPassMode = true;
-            pendingActionCardCount = sevenCount;
+            pendingActionCardCount = state.SevenPassCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleSevenPassSequence(currentPlayer));
             yield break;
         }
-        else if (tenCount > 0)
+
+        // --- 10捨て ---
+        // 手動計算をやめて state.TenDiscardCount を見る
+        if (state.TenDiscardCount > 0)
         {
-            Debug.Log($"10捨て発動: {tenCount}枚");
+            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
             skipTurnAdvance = true;
             isTenDiscardMode = true;
-            pendingActionCardCount = tenCount;
+            pendingActionCardCount = state.TenDiscardCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleTenDiscardSequence(currentPlayer));
@@ -1489,6 +1477,8 @@ public class GameManager : MonoBehaviour
         // 相手がHumanなら手札再描画、CPUなら裏面再描画
         if (toPlayer is HumanPlayer)
         {
+            // カードを受け取って手札枚数が変わったため、スロットを再生成する
+            CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
         }
         else

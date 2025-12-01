@@ -2,19 +2,20 @@ using System.Collections.Generic;
 
 public class GameState
 {
-    // GameManager 側で渡す「場のカード」のコピーや参照
     public List<Card> TableCards;
-
-    // 今のプレイヤーインデックス（必要なら）
     public int CurrentPlayerIndex;
-
-    // ルールから「このプレイヤーのターンを継続せよ」と伝えるフラグ
     public bool KeepTurn = false;
-
     public int CurrentTurnIndex { get; private set; }
-    public bool TriggerRevolution { get; set; } = false; // 革命が起きたか
-    public bool IsElevenBack { get; set; } = false;      // 11バック状態か
-    public int SkipCount { get; set; } = 0;              // 何人飛ばすか
+
+    // --- ルール判定結果フラグ ---
+    public bool TriggerRevolution { get; set; } = false;
+    public bool IsElevenBack { get; set; } = false;
+    public int SkipCount { get; set; } = 0;
+
+    // ★ 追加: 8切り、7渡し、10捨ての状態を追加
+    public bool IsEightCut { get; set; } = false;
+    public int SevenPassCount { get; set; } = 0; // 0なら発動なし
+    public int TenDiscardCount { get; set; } = 0; // 0なら発動なし
 
     public GameState(List<Card> tableCards, int currentPlayerIndex)
     {
