@@ -111,7 +111,6 @@ public class GameManager : MonoBehaviour
 
     private void EndTurn()
     {
-        // ★ 修正 1: nextTurnIndex の宣言をメソッドの先頭に移動し、スコープエラーを回避
         int nextTurnIndex;
 
         if (skipTurnAdvance)
@@ -119,32 +118,29 @@ public class GameManager : MonoBehaviour
             skipTurnAdvance = false;
             pendingSkipCount = 0;
 
-            // ★ 修正 2: 特殊アクション完了後は、必ず次のプレイヤーのターンに進める
-            nextTurnIndex = (currentTurnIndex + 1) % players.Count;
+            // 元のコード: nextTurnIndex = (currentTurnIndex + 1) % players.Count;
+
+            nextTurnIndex = currentTurnIndex;
+
+
             currentTurnIndex = nextTurnIndex;
 
             StartCoroutine(NextTurnDelay());
             return; // 通常のターン進行ロジックへ移行しない
         }
 
-        // 通常のターン進行ロジック
-        // 次のターン = (現在 + 1 + スキップ数) % 人数
-        // ★ 修正 3: 宣言済み変数 nextTurnIndex への代入に変更
+        // --- 以下、通常のターン進行 ---
         nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
 
         // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
         if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
         {
             EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。");
-
-            // 全員スキップで自分に番が戻った場合、場を流して自分からスタート
             StartCoroutine(ClearTableAndRestart());
             return;
         }
 
         currentTurnIndex = nextTurnIndex;
-
-        // 計算が終わったのでリセット
         pendingSkipCount = 0;
 
         StartCoroutine(NextTurnDelay());
@@ -1008,14 +1004,14 @@ public class GameManager : MonoBehaviour
         if (state.TriggerRevolution)
         {
             isRevolution = !isRevolution; // 状態反転
-            string status = isRevolution ? "革命開始！" : "革命終了！";
+            string status = isRevolution ? "革命開始!" : "革命終了!";
             EnqueueMessage(status);
         }
 
         // 2. 11バック反映（場が流れるまで有効）
         if (state.IsElevenBack)
         {
-            EnqueueMessage("11バック！");
+            EnqueueMessage("11バック!");
             isTempRevolution = true;
         }
 
@@ -1024,7 +1020,7 @@ public class GameManager : MonoBehaviour
 
         if (pendingSkipCount > 0)
         {
-            EnqueueMessage($"{pendingSkipCount}人飛ばし！");
+            EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
         // 4. 8切り & 場を流す処理
@@ -1036,7 +1032,7 @@ public class GameManager : MonoBehaviour
 
             if (state.KeepTurn)
             {
-                EnqueueMessage("8切り！");
+                EnqueueMessage("8切り!");
 
                 // 1. 少し待機
                 yield return new WaitForSeconds(1.0f);
@@ -1389,7 +1385,7 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
-        EnqueueMessage($"7渡し！ {pendingActionCardCount}枚選んでください");
+        EnqueueMessage($"7渡し! {pendingActionCardCount}枚選んでください");
 
         if (player is HumanPlayer)
         {
@@ -1431,7 +1427,7 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleTenDiscardSequence(PlayerBase player)
     {
-        EnqueueMessage($"10捨て！ {pendingActionCardCount}枚選んで捨ててください");
+        EnqueueMessage($"10捨て! {pendingActionCardCount}枚選んで捨ててください");
 
         if (player is HumanPlayer)
         {
@@ -1516,9 +1512,12 @@ public class GameManager : MonoBehaviour
 
         // モード解除
         isSevenPassMode = false;
-        ResetPlayButtonUI(); // ボタンを元に戻す
 
-        EndTurn(); // ターン終了
+        skipTurnAdvance = false;
+
+        ResetPlayButtonUI();
+
+        EndTurn(); // ここで通常のターン進行ルートに入り、次の人へ進む
     }
 
     // 実際にカードを捨てる処理（10捨て）
@@ -1546,9 +1545,11 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(0.8f);
 
         isTenDiscardMode = false;
+        skipTurnAdvance = false;
+
         ResetPlayButtonUI();
 
-        EndTurn(); 
+        EndTurn();
     }
 
     private void ResetPlayButtonUI()
