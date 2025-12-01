@@ -59,6 +59,10 @@ public class GameManager : MonoBehaviour
     private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
     // ★ カードの強さを数値化するメソッド
     private int pendingSkipCount = 0;
+
+    private bool isSevenPassMode = false;   // 7渡しモード中か
+    private bool isTenDiscardMode = false;  // 10捨てモード中か
+    private int pendingActionCardCount = 0; // 渡す/捨てる枚数
     public int GetCardStrength(int rank)
     {
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
@@ -107,25 +111,35 @@ public class GameManager : MonoBehaviour
 
     private void EndTurn()
     {
+        // ★ 修正 1: nextTurnIndex の宣言をメソッドの先頭に移動し、スコープエラーを回避
+        int nextTurnIndex;
+
         if (skipTurnAdvance)
         {
             skipTurnAdvance = false;
             pendingSkipCount = 0;
-            StartCoroutine(NextTurnDelay()); // ここで正しく「一度だけ」次のターン（自分）が始まります
-            return;
+
+            // ★ 修正 2: 特殊アクション完了後は、必ず次のプレイヤーのターンに進める
+            nextTurnIndex = (currentTurnIndex + 1) % players.Count;
+            currentTurnIndex = nextTurnIndex;
+
+            StartCoroutine(NextTurnDelay());
+            return; // 通常のターン進行ロジックへ移行しない
         }
 
+        // 通常のターン進行ロジック
         // 次のターン = (現在 + 1 + スキップ数) % 人数
-        int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
+        // ★ 修正 3: 宣言済み変数 nextTurnIndex への代入に変更
+        nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
 
         // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
         if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
         {
-            EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。"); // メッセージ修正
+            EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。");
 
             // 全員スキップで自分に番が戻った場合、場を流して自分からスタート
             StartCoroutine(ClearTableAndRestart());
-            return; // ターンを終了し、流す処理に任せる
+            return;
         }
 
         currentTurnIndex = nextTurnIndex;
@@ -213,6 +227,12 @@ public class GameManager : MonoBehaviour
         foreach (var c in playableCards) cpu.Hand.Remove(c);
 
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
+
+        // （EndTurn() はカードを選び終わった後の Execute...Action で呼ばれるため）
+        if (isSevenPassMode || isTenDiscardMode)
+        {
+            yield break;
+        }
         yield return new WaitForSeconds(0.8f);
         EndTurn();
     }
@@ -367,7 +387,6 @@ public class GameManager : MonoBehaviour
     // ボタンの表示/非表示を管理するメソッド
     private void UpdateButtonVisibility()
     {
-        // 1. 自分のターンでない場合、両方隠す
         if (!isPlayerTurn)
         {
             if (playButton != null) playButton.gameObject.SetActive(false);
@@ -375,26 +394,58 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        // --- 以下、自分のターンの処理 ---
-
-        // 2. プレイボタンの制御
-        // 「表示させてよい」とのことなので、自分のターン中は常に表示(Active)にします
         if (playButton != null)
         {
             playButton.gameObject.SetActive(true);
 
-            // 【オプション】もし「カードを選んでない時は押せない（グレー）」にしたいなら、
-            // 下の行のコメントアウト(//)を外して有効にしてください。
-            // playButton.interactable = IsAnyCardSelected();
-        }
+            // --- 以下、自分のターンの処理 ---
 
-        // 3. パスボタンの制御
-        // 場にカードがない（null または 0枚）＝ 自分が親（最初に出す人）
-        // 親ならパスできないので非表示、それ以外（場にカードがある）なら表示
-        if (passButton != null)
-        {
-            bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
-            passButton.gameObject.SetActive(!isFieldEmpty);
+            // ================================================================
+            // ★ 追記: 特殊モードのボタン制御
+            // ================================================================
+            if (isSevenPassMode || isTenDiscardMode)
+            {
+                if (playButton != null)
+                {
+                    playButton.gameObject.SetActive(true);
+
+                    int selectedCount = human.SelectCards(human.Hand).Count;
+                    int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+
+                    // 選択枚数が指定枚数と一致した時のみボタン有効
+                    playButton.interactable = (selectedCount == required);
+                }
+                if (passButton != null) passButton.gameObject.SetActive(false);
+                return;
+            }
+            // ================================================================
+
+            // 2. プレイボタンの制御 (通常時)
+            if (playButton != null)
+            {
+                playButton.gameObject.SetActive(true);
+
+                // 通常モードでは、役が成立している場合のみボタン有効にするロジックをここに書く
+                var selected = human.SelectCards(human.Hand);
+                if (selected.Count > 0)
+                {
+                    playButton.interactable = IsValidPlay(human.Hand, selected, lastPlayedCards);
+                }
+                else
+                {
+                    // 何も選んでいなければボタン無効
+                    playButton.interactable = false;
+                }
+            }
+
+            // 3. パスボタンの制御
+            // 場にカードがない（null または 0枚）＝ 自分が親（最初に出す人）
+            // 親ならパスできないので非表示、それ以外（場にカードがある）なら表示
+            if (passButton != null)
+            {
+                bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
+                passButton.gameObject.SetActive(!isFieldEmpty);
+            }
         }
     }
 
@@ -506,8 +557,23 @@ public class GameManager : MonoBehaviour
 
         player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
 
-        var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
-        var playableCards = GetLegalCardsForUI(player.Hand, tableCards);
+        // ================================================================
+        // ★ 修正箇所: 7渡し/10捨てモードの場合は、全カードを選択可能にする
+        // ================================================================
+        List<Card> playableCards;
+
+        if (isSevenPassMode || isTenDiscardMode)
+        {
+            // 特殊アクションモード中は、手札全てが選択可能
+            playableCards = new List<Card>(player.Hand);
+        }
+        else
+        {
+            // 通常のプレイモード
+            var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
+            playableCards = GetLegalCardsForUI(player.Hand, tableCards);
+        }
+        // ================================================================
 
         for (int i = 0; i < player.Hand.Count; i++)
         {
@@ -563,21 +629,62 @@ public class GameManager : MonoBehaviour
     private IEnumerator PlayerPlayRoutine(List<Card> played)
     {
         yield return StartCoroutine(DisplayPlayedCardsOnTable(human, played));
+
+        // ★ 修正箇所: 特殊モードが起動したら、EndTurn()を呼ばずに入力待ちに入る
+        if (isSevenPassMode || isTenDiscardMode)
+        {
+            // EndTurn()は特殊アクション完了時（Execute...Actionの最後）に呼ばれるので、
+            // ここでは何もしない（プレイヤーの次の入力（OnPlayButton）を待つ）
+            yield break;
+        }
+
         EndTurn();
     }
 
     public void OnPlayButton()
     {
-        // 自分のターンでなければ無視
         if (!isPlayerTurn) return;
 
-        // ボタンが設定されており、すでに無効なら無視（連打防止）
-        if (playButton != null && !playButton.interactable) return;
+        // --- ★ 追加: 特殊モードの処理 ---
+        if (isSevenPassMode)
+        {
+            var selected = human.SelectCards(human.Hand);
+            // 選択枚数が足りているかチェック
+            int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-        // 押された瞬間にボタンを無効化（これで連打を防ぐ）
+            if (selected.Count != required)
+            {
+                EnqueueMessage($"{required}枚 選んでください");
+                return;
+            }
+
+            playButton.interactable = false;
+            StartCoroutine(ExecuteSevenPassTransfer(human, selected));
+            return;
+        }
+
+        if (isTenDiscardMode)
+        {
+            var selected = human.SelectCards(human.Hand);
+            int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+
+            if (selected.Count != required)
+            {
+                EnqueueMessage($"{required}枚 選んでください");
+                return;
+            }
+
+            playButton.interactable = false;
+            StartCoroutine(ExecuteTenDiscardAction(human, selected));
+            return;
+        }
+        // ----------------------------------
+
+        // 以下、既存の通常プレイ処理
+        if (playButton != null && !playButton.interactable) return;
         if (playButton != null) playButton.interactable = false;
 
-        var played = human.SelectCards(human.Hand);
+        var played = human.SelectCards(human.Hand); ;
 
         if (played == null || played.Count == 0)
         {
@@ -880,6 +987,7 @@ public class GameManager : MonoBehaviour
         // 新しいカードが出たので、これまでのパス回数はリセット
         passCount = 0;
 
+        // ジョーカーを具体的なランクに変換
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
 
         // GameState を作る
@@ -887,7 +995,7 @@ public class GameManager : MonoBehaviour
 
         foreach (var rule in rules)
         {
-            // ▼ 変更点: ここで played (生データ) ではなく effectivePlayedCards (変換後) を渡す
+            // ここで played (生データ) ではなく effectivePlayedCards (変換後) を渡す
             if (rule.CanApply(effectivePlayedCards, state))
             {
                 rule.Apply(effectivePlayedCards, state);
@@ -900,14 +1008,14 @@ public class GameManager : MonoBehaviour
         if (state.TriggerRevolution)
         {
             isRevolution = !isRevolution; // 状態反転
-            string status = isRevolution ? "革命開始!" : "革命終了!";
+            string status = isRevolution ? "革命開始！" : "革命終了！";
             EnqueueMessage(status);
         }
 
         // 2. 11バック反映（場が流れるまで有効）
         if (state.IsElevenBack)
         {
-            EnqueueMessage("11バック!");
+            EnqueueMessage("11バック！");
             isTempRevolution = true;
         }
 
@@ -916,7 +1024,7 @@ public class GameManager : MonoBehaviour
 
         if (pendingSkipCount > 0)
         {
-            EnqueueMessage($"{pendingSkipCount}人飛ばし");
+            EnqueueMessage($"{pendingSkipCount}人飛ばし！");
         }
 
         // 4. 8切り & 場を流す処理
@@ -928,7 +1036,7 @@ public class GameManager : MonoBehaviour
 
             if (state.KeepTurn)
             {
-                EnqueueMessage("8切り!");
+                EnqueueMessage("8切り！");
 
                 // 1. 少し待機
                 yield return new WaitForSeconds(1.0f);
@@ -946,23 +1054,48 @@ public class GameManager : MonoBehaviour
                 yield break; // ここで抜けて EndTurn() に任せる
             }
         }
+
         // スキップが予約されている場合、その人数分を passCount に加算する
-        // （スキップされた人数 = 出せなかった人数）と見なす
         if (pendingSkipCount > 0)
         {
-            // passCount にスキップ人数を加算
             passCount += pendingSkipCount;
-
-            // もし加算後に場が流れる条件を満たしていたら、ここで場を流す処理を呼び出す
             if (passCount >= players.Count - 1)
             {
-                // 次の EndTurn() や NextTurnDelay() を呼ばずに、ここで終了する
                 StartCoroutine(ClearTableAndRestart());
                 yield break;
             }
         }
+
+        // 5. 7渡し判定 (ランク7が含まれている枚数分)
+        int sevenCount = effectivePlayedCards.Count(c => c.Rank == 7);
+
+        // 6. 10捨て判定 (ランク10が含まれている枚数分)
+        int tenCount = effectivePlayedCards.Count(c => c.Rank == 10);
+
+        if (sevenCount > 0)
+        {
+            Debug.Log($"7渡し発動: {sevenCount}枚");
+            skipTurnAdvance = true;
+            isSevenPassMode = true;
+            pendingActionCardCount = sevenCount;
+
+            yield return new WaitForSeconds(1.0f);
+            StartCoroutine(HandleSevenPassSequence(currentPlayer));
+            yield break;
+        }
+        else if (tenCount > 0)
+        {
+            Debug.Log($"10捨て発動: {tenCount}枚");
+            skipTurnAdvance = true;
+            isTenDiscardMode = true;
+            pendingActionCardCount = tenCount;
+
+            yield return new WaitForSeconds(1.0f);
+            StartCoroutine(HandleTenDiscardSequence(currentPlayer));
+            yield break;
+        }
     }
-    
+
 
     private void RemovePlayedCardsFromUI(List<Card> played)
     {
@@ -1249,5 +1382,182 @@ public class GameManager : MonoBehaviour
         }
 
         return effectiveList;
+    }
+    // ================================================================
+    // --- 7渡し / 10捨て 処理ロジック ---
+    // ================================================================
+
+    private IEnumerator HandleSevenPassSequence(PlayerBase player)
+    {
+        EnqueueMessage($"7渡し！ {pendingActionCardCount}枚選んでください");
+
+        if (player is HumanPlayer)
+        {
+            // --- ★ 修正開始 ★ ---
+            // 1. カード選択状態をリセット
+            ResetPlayerSelection();
+
+            // 2. 手札の枚数に合わせてスロットを再生成
+            CreatePlayerCardSlots(human.Hand.Count);
+
+            // 3. 手札を再描画し、全てのカードを選択可能にする
+            PopulatePlayerHand(human);
+            // --- ★ 修正終了 ★ ---
+
+            // プレイヤー入力待ちモードへ
+            if (passButton != null) passButton.interactable = false; // パスはできない
+            if (playButton != null)
+            {
+                playButton.interactable = false; // 選択するまで押せない
+                playButton.GetComponentInChildren<TextMeshProUGUI>().text = "あげる";
+            }
+
+            // プレイヤーがカードを選んで「あげる」ボタンを押すのを待つ
+            yield break;
+        }
+        else
+        {
+            // CPUの処理: 手札から不要なカード（弱い順）を選ぶ
+            yield return new WaitForSeconds(1.0f);
+
+            var hand = player.Hand.OrderBy(c => c.Rank).ToList(); // 弱い順
+            // 枚数が足りない場合は全手札
+            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            var cardsToPass = hand.Take(count).ToList();
+
+            yield return StartCoroutine(ExecuteSevenPassTransfer(player, cardsToPass));
+        }
+    }
+
+    private IEnumerator HandleTenDiscardSequence(PlayerBase player)
+    {
+        EnqueueMessage($"10捨て！ {pendingActionCardCount}枚選んで捨ててください");
+
+        if (player is HumanPlayer)
+        {
+            // --- ★ 修正開始 ★ ---
+            // 1. カード選択状態をリセット
+            ResetPlayerSelection();
+
+            // 2. 手札の枚数に合わせてスロットを再生成 (前のターンでカードを出したため枚数が減っている)
+            CreatePlayerCardSlots(human.Hand.Count);
+
+            // 3. 手札を再描画し、全てのカードを選択可能にする (PopulatePlayerHand内のロジックがisTenDiscardModeを見て全有効化する)
+            PopulatePlayerHand(human);
+            // --- ★ 修正終了 ★ ---
+
+            if (passButton != null) passButton.interactable = false;
+            if (playButton != null)
+            {
+                playButton.interactable = false;
+                playButton.GetComponentInChildren<TextMeshProUGUI>().text = "捨てる";
+            }
+            // プレイヤー入力待ち
+            yield break;
+        }
+        else
+        {
+            // CPUの処理: 弱い順に捨てる
+            yield return new WaitForSeconds(1.0f);
+
+            var hand = player.Hand.OrderBy(c => c.Rank).ToList();
+            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            var cardsToDiscard = hand.Take(count).ToList();
+
+            yield return StartCoroutine(ExecuteTenDiscardAction(player, cardsToDiscard));
+        }
+    }
+
+    // 実際にカードを移動させる処理（7渡し）
+    public IEnumerator ExecuteSevenPassTransfer(PlayerBase fromPlayer, List<Card> cards)
+    {
+        // 次のプレイヤーを特定
+        int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
+        PlayerBase toPlayer = players[nextIndex];
+
+        Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
+
+        // アニメーション用（簡易）: 手札から消して、相手の手札へ
+        foreach (var card in cards)
+        {
+            fromPlayer.Hand.Remove(card);
+            toPlayer.Hand.Add(card);
+
+            // UI更新: 自分の手札なら消す
+            if (fromPlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        // 相手がHumanなら手札再描画、CPUなら裏面再描画
+        if (toPlayer is HumanPlayer)
+        {
+            PopulatePlayerHand(human);
+        }
+        else
+        {
+            Transform cpuArea = null;
+            if (toPlayer == cpuPlayers[0]) cpuArea = handAreaCPU1;
+            else if (toPlayer == cpuPlayers[1]) cpuArea = handAreaCPU2;
+            else if (toPlayer == cpuPlayers[2]) cpuArea = handAreaCPU3;
+
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, toPlayer.Hand.Count);
+        }
+
+        // 自分がCPUでカードが減った場合も再描画
+        if (fromPlayer is not HumanPlayer)
+        {
+            Transform cpuArea = fromPlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, fromPlayer.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        // モード解除
+        isSevenPassMode = false;
+        ResetPlayButtonUI(); // ボタンを元に戻す
+
+        EndTurn(); // ターン終了
+    }
+
+    // 実際にカードを捨てる処理（10捨て）
+    public IEnumerator ExecuteTenDiscardAction(PlayerBase player, List<Card> cards)
+    {
+        Debug.Log($"{player.Name} は {cards.Count}枚 捨てました");
+
+        // 墓地（のような場所）へ移動アニメーションを入れても良いが、今回は削除のみ
+        foreach (var card in cards)
+        {
+            player.Hand.Remove(card);
+            // UIから削除
+            if (player is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        if (player is not HumanPlayer)
+        {
+            Transform cpuArea = player.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, player.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        isTenDiscardMode = false;
+        ResetPlayButtonUI();
+
+        EndTurn(); 
+    }
+
+    private void ResetPlayButtonUI()
+    {
+        if (playButton != null)
+        {
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "Play";
+            playButton.interactable = false;
+        }
+        if (passButton != null) passButton.interactable = true;
     }
 }
