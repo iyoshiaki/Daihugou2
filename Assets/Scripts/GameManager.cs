@@ -528,7 +528,7 @@ public class GameManager : MonoBehaviour
                 {
                     Suit = s,
                     Rank = r,
-                    SpritePath = $"Images/{s}s_{r}"
+                    SpritePath = $"Images/{s}_{r}"
                 });
         deck.Add(Card.CreateJoker());
 

@@ -46,7 +46,7 @@ public class Card
         {
             Suit = Suit.Joker,
             Rank = 99,                     // 特殊ランクとして99を設定
-            SpritePath = "Cards/card_empty"     // Resources/Cards/Joker 画像が必要
+            SpritePath = "Cards/Joker"     // Resources/Cards/Joker 画像が必要
         };
     }
 }

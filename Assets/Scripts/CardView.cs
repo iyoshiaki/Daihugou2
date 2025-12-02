@@ -42,7 +42,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
 
         if (card.IsJoker())
         {
-            cardImage.sprite = Resources.Load<Sprite>("Cards/card_empty");
+            cardImage.sprite = Resources.Load<Sprite>("Cards/Joker");
 
             // RectTransform‚ğ‹­§“I‚ÉÄŒvZ‚³‚¹‚é
             if (cardImage.rectTransform.parent != null)
