@@ -36,6 +36,18 @@ public class SceneChanger : MonoBehaviour
         SceneManager.LoadScene("modesentaku");
     }
 
+    // オリジナルルールボタンを押したときに呼ぶ関数
+    public void GoTooriginal()
+    {
+        SceneManager.LoadScene("original");
+    }
+
+    // みんなで画面の「戻る」ボタンを押したときに呼ぶ関数
+    public void BackToRulesetteings()
+    {
+        SceneManager.LoadScene("Rulesettings");
+    }
+
     // Start is called before the first frame update
     void Start()
     {
