@@ -20,6 +20,21 @@ public class GameManager : MonoBehaviour
     public GameObject cardPrefab;
     public Sprite cardBackSprite;
 
+    // 勝敗・ゲーム進行管理用
+    private List<PlayerBase> remainingPlayers; // まだあがっていないプレイヤー
+    private Dictionary<PlayerBase, int> gameRanks = new(); // 順位 (Key:Player, Value:順位)
+    private int currentRank = 1; // 現在の順位（1位からスタート）
+    private bool isGameOver = false; // ゲーム（1ラウンド）終了フラグ
+
+    [Header("Rule Settings")]
+    [Tooltip("7渡しや10捨てのような特殊アクションの結果としてあがることを禁止する")]
+    private bool forbidSpecialWin = false; // 初期値はOFF（許可）
+
+    // 4回戦の設定
+    private const int TotalGames = 4;
+    private int currentGameCount = 1;
+    private Dictionary<PlayerBase, int> totalPoints = new(); // 累計スコア
+
     private HumanPlayer human;
     private List<CpuPlayer> cpuPlayers = new();
 
@@ -63,6 +78,11 @@ public class GameManager : MonoBehaviour
     private bool isSevenPassMode = false;   // 7渡しモード中か
     private bool isTenDiscardMode = false;  // 10捨てモード中か
     private int pendingActionCardCount = 0; // 渡す/捨てる枚数
+    public void SetForbidSpecialWin(bool value)
+    {
+        forbidSpecialWin = value;
+        Debug.Log($"禁止あがりルールが {(value ? "ON" : "OFF")} に設定されました。");
+    }
     public int GetCardStrength(int rank)
     {
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
@@ -111,37 +131,52 @@ public class GameManager : MonoBehaviour
 
     private void EndTurn()
     {
-        int nextTurnIndex;
+        // ゲーム終了時は何もしない
+        if (isGameOver) return;
 
+        // --- 1. 8切りなどで「もう一度自分のターン」の場合 ---
         if (skipTurnAdvance)
         {
             skipTurnAdvance = false;
             pendingSkipCount = 0;
 
-            // 元のコード: nextTurnIndex = (currentTurnIndex + 1) % players.Count;
-
-            nextTurnIndex = currentTurnIndex;
-
-
-            currentTurnIndex = nextTurnIndex;
-
-            StartCoroutine(NextTurnDelay());
-            return; // 通常のターン進行ロジックへ移行しない
+            // もし「俺のターン」と言った自分が、まだあがっていなければ（手札があれば）
+            if (remainingPlayers.Contains(players[currentTurnIndex]))
+            {
+                // インデックスを変えずに、もう一度自分のターンへ
+                StartCoroutine(NextTurnDelay());
+                return;
+            }
+            // もし自分があがってしまっていたら、権限はないので下の通常進行へ流す
         }
 
-        // --- 以下、通常のターン進行 ---
-        nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
+        // --- 2. 通常のターン進行 ---
 
-        // もし一周回って自分に戻ってきた場合（3枚出しスキップなど）
-        if (pendingSkipCount > 0 && nextTurnIndex == currentTurnIndex)
+        // ★修正: nextTurnIndex をここで宣言して計算に使います
+        int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
+
+        pendingSkipCount = 0; // スキップ数をリセット
+
+        // --- 3. あがったプレイヤー（remainingPlayersにいない人）をスキップする ---
+        int loopSafety = 0;
+
+        // 次の候補者が「あがった人」である間、インデックスを進め続ける
+        while (!remainingPlayers.Contains(players[nextTurnIndex]))
         {
-            EnqueueMessage("全員スキップ!場が流れ、もう一度自分の番です。");
-            StartCoroutine(ClearTableAndRestart());
-            return;
+            nextTurnIndex = (nextTurnIndex + 1) % players.Count;
+
+            // 無限ループ防止（全員あがってしまった場合など）
+            loopSafety++;
+            if (loopSafety > players.Count + 2)
+            {
+                isGameOver = true;
+                StartCoroutine(EndGameRoutine());
+                return;
+            }
         }
 
+        // --- 4. プレイヤー確定 ---
         currentTurnIndex = nextTurnIndex;
-        pendingSkipCount = 0;
 
         StartCoroutine(NextTurnDelay());
     }
@@ -365,6 +400,9 @@ public class GameManager : MonoBehaviour
         players = new List<PlayerBase> { humanPlayer };
         players.AddRange(cpuPlayers);
 
+        remainingPlayers = new List<PlayerBase>(players);
+        currentGameCount = 1; // ゲーム数リセット
+
         //特殊ルール
         rules.Add(new EightCutRule());
         rules.Add(new RevolutionRule()); 
@@ -372,6 +410,8 @@ public class GameManager : MonoBehaviour
         rules.Add(new FiveSkipRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
+
+        // StartTurn();
     }
     void Update()
     {
@@ -977,6 +1017,20 @@ public class GameManager : MonoBehaviour
             foreach (var c in played) human.Hand.Remove(c);
             RemovePlayedCardsFromUI(played);
         }
+        CheckForWin(currentPlayer);
+        if (isGameOver) yield break; // ゲーム終了ならここで中断
+
+        // ここではシンプルに「あがったら即座に抜ける」とし、以降の処理をスキップする場合
+        if (!remainingPlayers.Contains(currentPlayer))
+        {
+            // あがったプレイヤーのターン処理はここで打ち切り
+            // ただし、8切りなどの「場を流す」処理が必要な場合は考慮が必要ですが、
+            // 一般的にあがりカードでの特殊効果は有効にしつつ、ターンは回さない
+
+            // 8切りであがった場合などのために、少し下の処理は通しても良いが
+            // 7渡し/10捨てなどの「アクション」はできないのでガードする
+        }
+
 
         lastPlayedCards = new List<Card>(played);
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
@@ -1033,18 +1087,19 @@ public class GameManager : MonoBehaviour
             pendingSkipCount = 0;
             isTempRevolution = false;
 
-            if (state.KeepTurn)
+            if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
             {
                 skipTurnAdvance = true; // ターンを進めない
                 yield break; // ここで抜けて EndTurn() へ
             }
+
         }
 
         // スキップ処理 (8切りじゃなかった場合)
         if (pendingSkipCount > 0)
         {
             passCount += pendingSkipCount;
-            if (passCount >= players.Count - 1)
+            if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
             {
                 StartCoroutine(ClearTableAndRestart());
                 yield break;
@@ -1094,7 +1149,8 @@ public class GameManager : MonoBehaviour
     {
         passCount++;
 
-        if (passCount >= players.Count - 1)
+        // ★修正: 残っている人数 - 1 人がパスしたら流れる
+        if (passCount >= remainingPlayers.Count - 1) // ※自分以外の全員
         {
             StartCoroutine(ClearTableAndRestart());
         }
@@ -1117,7 +1173,24 @@ public class GameManager : MonoBehaviour
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
-        currentTurnIndex = lastPlayedPlayerIndex;
+        // lastPlayedPlayerIndex の人がまだいるかチェック
+        PlayerBase lastPlayer = players[lastPlayedPlayerIndex];
+
+        if (remainingPlayers.Contains(lastPlayer))
+        {
+            currentTurnIndex = lastPlayedPlayerIndex;
+        }
+        else
+        {
+            // あがっていた場合、その次の「まだいる人」を親にする
+            int nextIdx = (lastPlayedPlayerIndex + 1) % players.Count;
+            while (!remainingPlayers.Contains(players[nextIdx]))
+            {
+                nextIdx = (nextIdx + 1) % players.Count;
+            }
+            currentTurnIndex = nextIdx;
+        }
+
         yield return new WaitForSeconds(0.6f);
         StartTurn();
     }
@@ -1467,7 +1540,7 @@ public class GameManager : MonoBehaviour
             fromPlayer.Hand.Remove(card);
             toPlayer.Hand.Add(card);
 
-            // UI更新: 自分の手札なら消す
+            // UI更新: 自分の手札からカードが消えた場合の処理
             if (fromPlayer is HumanPlayer)
             {
                 RemovePlayedCardsFromUI(new List<Card> { card });
@@ -1500,9 +1573,28 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
+        // ==========================================================
+        // ★★★ 修正・追加: あがり判定ロジックの挿入 ★★★
+        // ==========================================================
+
+        // 特殊ルールによるあがりが禁止されており、かつ今回のアクションで手札が0になる場合
+        // ※ fromPlayer の手札が0になっているかチェック
+        if (forbidSpecialWin && fromPlayer.Hand.Count == 0)
+        {
+            EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています！");
+            // あがりではないので、処理を続行し EndTurn へ
+        }
+        else
+        {
+            // 禁止されていなければ、通常通りあがり判定を行う
+            CheckForWin(fromPlayer);
+            if (isGameOver) yield break; // あがったらゲーム終了コルーチンへ
+        }
+
+        // ==========================================================
+
         // モード解除
         isSevenPassMode = false;
-
         skipTurnAdvance = false;
 
         ResetPlayButtonUI();
@@ -1515,17 +1607,18 @@ public class GameManager : MonoBehaviour
     {
         Debug.Log($"{player.Name} は {cards.Count}枚 捨てました");
 
-        // 墓地（のような場所）へ移動アニメーションを入れても良いが、今回は削除のみ
+        // 1. カードを手札から削除 (データ更新)
         foreach (var card in cards)
         {
             player.Hand.Remove(card);
-            // UIから削除
+            // UIから削除 (HumanPlayerの場合のみ)
             if (player is HumanPlayer)
             {
                 RemovePlayedCardsFromUI(new List<Card> { card });
             }
         }
 
+        // 2. UIの再描画 (データ更新後、判定前に見た目を更新)
         if (player is not HumanPlayer)
         {
             Transform cpuArea = player.handArea;
@@ -1534,6 +1627,21 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
+        // 3. ★禁止あがり判定とあがり判定 (メイン修正箇所)
+
+        // 【禁止あがり判定】10捨てによるあがりが禁止されており、かつ手札が0枚になった場合
+        if (forbidSpecialWin && player.Hand.Count == 0)
+        {
+            EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています！");
+        }
+        else
+        {
+            // 禁止されていなければ、通常通りあがり判定を行う
+            CheckForWin(player);
+            if (isGameOver) yield break; // あがったらゲーム終了コルーチンへ
+        }
+
+        // 4. モード解除とターン終了
         isTenDiscardMode = false;
         skipTurnAdvance = false;
 
@@ -1550,5 +1658,86 @@ public class GameManager : MonoBehaviour
             playButton.interactable = false;
         }
         if (passButton != null) passButton.interactable = true;
+    }
+
+    private void CheckForWin(PlayerBase player)
+    {
+        if (player.Hand.Count == 0)
+        {
+            // 1. 順位確定
+            gameRanks[player] = currentRank;
+            EnqueueMessage($"{player.Name} があがりました! ({currentRank}位)");
+
+            currentRank++;
+            remainingPlayers.Remove(player); // ゲーム参加者リストから除外
+
+            // 2. 残り1人になったらラウンド終了
+            if (remainingPlayers.Count <= 1)
+            {
+                // 最後の1人は自動的に最下位
+                var lastPlayer = remainingPlayers[0];
+                gameRanks[lastPlayer] = currentRank;
+                EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
+
+                isGameOver = true;
+                StartCoroutine(EndGameRoutine()); // ゲーム終了コルーチンへ
+            }
+        }
+    }
+    private IEnumerator EndGameRoutine()
+    {
+        yield return new WaitForSeconds(2.0f);
+        EnqueueMessage($"--- 第{currentGameCount}戦 終了 ---");
+
+        // ここで順位に応じたポイント計算などをしても良い
+
+        yield return new WaitForSeconds(3.0f);
+
+        currentGameCount++;
+
+        if (currentGameCount <= TotalGames)
+        {
+            EnqueueMessage($"第{currentGameCount}戦を開始します");
+            yield return StartCoroutine(PrepareNextRound());
+        }
+        else
+        {
+            EnqueueMessage("全4戦終了！お疲れ様でした！");
+            // 結果表示画面へ遷移などの処理
+        }
+    }
+
+    // ★追加: 次のラウンドの準備
+    private IEnumerator PrepareNextRound()
+    {
+        // 1. 変数リセット
+        isGameOver = false;
+        isRevolution = false;
+        isTempRevolution = false;
+        currentRank = 1;
+        gameRanks.Clear();
+        passCount = 0;
+        lastPlayedCards.Clear();
+
+        // 2. 場を掃除
+        foreach (Transform child in tableArea) Destroy(child.gameObject);
+
+        // 3. 全員復活
+        remainingPlayers = new List<PlayerBase>(players);
+
+        // 4. 手札リセット & 再配布
+        foreach (var p in players) p.Hand.Clear();
+        DealInitialCards();
+
+        // 5. UI再構築
+        CreatePlayerCardSlots(human.Hand.Count);
+        PopulatePlayerHand(human);
+
+        // 6. 順番決め（大貧民から、などのルールがあればここで currentTurnIndex を設定）
+        // ここではとりあえずランダム、または前の勝者など固定でも可
+        currentTurnIndex = 0; // 仮：またプレイヤーから
+
+        yield return new WaitForSeconds(1.0f);
+        StartTurn();
     }
 }
