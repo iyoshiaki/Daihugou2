@@ -405,8 +405,8 @@ public class GameManager : MonoBehaviour
 
         //特殊ルール
         rules.Add(new EightCutRule());
-        rules.Add(new RevolutionRule()); 
-        rules.Add(new ElevenBackRule()); 
+        rules.Add(new RevolutionRule());
+        rules.Add(new ElevenBackRule());
         rules.Add(new FiveSkipRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
@@ -439,7 +439,7 @@ public class GameManager : MonoBehaviour
             // --- 以下、自分のターンの処理 ---
 
             // ================================================================
-            // ★ 追記: 特殊モードのボタン制御
+            // ★ 特殊モードのボタン制御
             // ================================================================
             if (isSevenPassMode || isTenDiscardMode)
             {
@@ -1020,17 +1020,8 @@ public class GameManager : MonoBehaviour
         CheckForWin(currentPlayer);
         if (isGameOver) yield break; // ゲーム終了ならここで中断
 
-        // ここではシンプルに「あがったら即座に抜ける」とし、以降の処理をスキップする場合
-        if (!remainingPlayers.Contains(currentPlayer))
-        {
-            // あがったプレイヤーのターン処理はここで打ち切り
-            // ただし、8切りなどの「場を流す」処理が必要な場合は考慮が必要ですが、
-            // 一般的にあがりカードでの特殊効果は有効にしつつ、ターンは回さない
-
-            // 8切りであがった場合などのために、少し下の処理は通しても良いが
-            // 7渡し/10捨てなどの「アクション」はできないのでガードする
-        }
-
+        // あがりカードの特殊効果（8切りなど）は有効にするため、ここでは抜けない
+        // ただし、7渡し/10捨ては手札が必要なので、以下のブロック内でガードする
 
         lastPlayedCards = new List<Card>(played);
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
@@ -1048,7 +1039,10 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // 2. ルール適用結果に基づいて演出とゲーム進行を制御
+        // 2. ルール適用結果の処理
+        // ★修正方針: 8切り（場を流す）を優先し、その後 7渡し/10捨て（アクション）を行う
+        // 　8切りが発生した場合、skipTurnAdvanceフラグを立てるが、
+        // 　7渡し/10捨てのシーケンスに入った場合は、その完了後にフラグを消さないように注意する
 
         // --- 革命 ---
         if (state.TriggerRevolution)
@@ -1071,68 +1065,85 @@ public class GameManager : MonoBehaviour
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
-        // --- 8切り ---
-        // さっき修正した state.IsEightCut フラグを見る
-        if (state.IsEightCut)
+        // ================================================================
+        // ★ 優先順位変更: 8切り判定と処理を先頭に持ってくる
+        // ================================================================
+
+        bool eightCutTriggered = state.IsEightCut;
+
+        if (eightCutTriggered)
         {
             EnqueueMessage("8切り!");
 
-            // 場を流す処理
+            // 8切りなので場を流す
             yield return new WaitForSeconds(1.0f);
             foreach (Transform child in tableArea) Destroy(child.gameObject);
             lastPlayedCards.Clear();
             passCount = 0;
 
-            // スキップなどを無効化
+            // 場が流れたので、スキップや11バックの状態もリセット
             pendingSkipCount = 0;
             isTempRevolution = false;
 
+            // 8切りなら「もう一度自分のターン」フラグを立てる
+            // ただし、あがっていた場合はターンは回ってこない
             if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
             {
-                skipTurnAdvance = true; // ターンを進めない
-                yield break; // ここで抜けて EndTurn() へ
+                skipTurnAdvance = true;
             }
 
-        }
-
-        // スキップ処理 (8切りじゃなかった場合)
-        if (pendingSkipCount > 0)
-        {
-            passCount += pendingSkipCount;
-            if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
-            {
-                StartCoroutine(ClearTableAndRestart());
-                yield break;
-            }
+            // ★ここでは yield break せず、続けて 7渡し/10捨て のチェックを行う
         }
 
         // --- 7渡し ---
-        // 手動計算をやめて state.SevenPassCount を見る
-        if (state.SevenPassCount > 0)
+        // あがっていない場合のみ（渡すカードが必要）
+        if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
             Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
-            skipTurnAdvance = true;
+
+            // 7渡しモードへ移行
             isSevenPassMode = true;
             pendingActionCardCount = state.SevenPassCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleSevenPassSequence(currentPlayer));
+
+            // 入力待ちになるのでここで中断
             yield break;
         }
 
         // --- 10捨て ---
-        // 手動計算をやめて state.TenDiscardCount を見る
-        if (state.TenDiscardCount > 0)
+        // あがっていない場合のみ（捨てるカードが必要）
+        if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
             Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
-            skipTurnAdvance = true;
+
+            // 10捨てモードへ移行
             isTenDiscardMode = true;
             pendingActionCardCount = state.TenDiscardCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleTenDiscardSequence(currentPlayer));
+
+            // 入力待ちになるのでここで中断
             yield break;
         }
+
+        // 7渡しも10捨ても発生しなかった場合の 8切り後処理
+        if (eightCutTriggered)
+        {
+            // アクションがない場合はここで EndTurn フローに戻るが、
+            // skipTurnAdvance が true なら EndTurn 内で自己ループ処理される
+            // (CPUやPlayerルーチンの最後で EndTurn が呼ばれる)
+        }
+
+        // 何も特殊アクションがなければ通常通りターン終了
+        if (pendingSkipCount > 0)
+        {
+            // 演出のみ
+        }
+
+        // 注意: このメソッド自体は呼び出し元に戻り、呼び出し元が EndTurn() を呼ぶかどうか判断する
     }
 
 
@@ -1244,6 +1255,13 @@ public class GameManager : MonoBehaviour
 
         while (messageQueue.Count > 0)
         {
+            // ★追加: 7渡しまたは10捨てモード中は、キューの処理を一時停止する
+            if (isSevenPassMode || isTenDiscardMode)
+            {
+                yield return null;
+                continue; // ループを続行し、モードが解除されるのを待つ
+            }
+
             string message = messageQueue.Dequeue();
 
             if (passMessageText == null)
@@ -1446,11 +1464,15 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
-        EnqueueMessage($"7渡し! {pendingActionCardCount}枚選んでください");
+        // ★修正: EnqueueMessageを使わず、メッセージを直接永続表示させる
+        string message = $"7渡し! {pendingActionCardCount}枚選んでください";
 
         if (player is HumanPlayer)
         {
-            // --- ★ 修正開始 ★ ---
+            // HumanPlayerの場合は直接テキストを設定
+            passMessageText.text = message;
+            passMessageText.gameObject.SetActive(true); // 表示を継続
+
             // 1. カード選択状態をリセット
             ResetPlayerSelection();
 
@@ -1459,7 +1481,6 @@ public class GameManager : MonoBehaviour
 
             // 3. 手札を再描画し、全てのカードを選択可能にする
             PopulatePlayerHand(human);
-            // --- ★ 修正終了 ★ ---
 
             // プレイヤー入力待ちモードへ
             if (passButton != null) passButton.interactable = false; // パスはできない
@@ -1474,7 +1495,8 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            // CPUの処理: 手札から不要なカード（弱い順）を選ぶ
+            // CPUの処理
+            EnqueueMessage(message); // CPUの場合は通常のメッセージフローで表示
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList(); // 弱い順
@@ -1488,11 +1510,15 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleTenDiscardSequence(PlayerBase player)
     {
-        EnqueueMessage($"10捨て! {pendingActionCardCount}枚選んで捨ててください");
+        // ★修正: EnqueueMessageを使わず、メッセージを直接永続表示させる
+        string message = $"10捨て! {pendingActionCardCount}枚選んで捨ててください";
 
         if (player is HumanPlayer)
         {
-            // --- ★ 修正開始 ★ ---
+            // HumanPlayerの場合は直接テキストを設定
+            passMessageText.text = message;
+            passMessageText.gameObject.SetActive(true); // 表示を継続
+
             // 1. カード選択状態をリセット
             ResetPlayerSelection();
 
@@ -1501,7 +1527,6 @@ public class GameManager : MonoBehaviour
 
             // 3. 手札を再描画し、全てのカードを選択可能にする (PopulatePlayerHand内のロジックがisTenDiscardModeを見て全有効化する)
             PopulatePlayerHand(human);
-            // --- ★ 修正終了 ★ ---
 
             if (passButton != null) passButton.interactable = false;
             if (playButton != null)
@@ -1514,7 +1539,8 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            // CPUの処理: 弱い順に捨てる
+            // CPUの処理
+            EnqueueMessage(message); // CPUの場合は通常のメッセージフローで表示
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
@@ -1595,7 +1621,12 @@ public class GameManager : MonoBehaviour
 
         // モード解除
         isSevenPassMode = false;
-        skipTurnAdvance = false;
+
+        // ★追加: メッセージをクリア
+        passMessageText.gameObject.SetActive(false);
+        passMessageText.text = "";
+
+        // skipTurnAdvance は 8切りで立ったものなのでここで折らない
 
         ResetPlayButtonUI();
 
@@ -1643,7 +1674,12 @@ public class GameManager : MonoBehaviour
 
         // 4. モード解除とターン終了
         isTenDiscardMode = false;
-        skipTurnAdvance = false;
+
+        // ★追加: メッセージをクリア
+        passMessageText.gameObject.SetActive(false);
+        passMessageText.text = "";
+
+        // skipTurnAdvance は 8切りで立ったものなのでここで折らない
 
         ResetPlayButtonUI();
 
