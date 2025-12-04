@@ -72,25 +72,22 @@ public class GameManager : MonoBehaviour
     // 現在の「強さ」計算プロパティ
     // 革命中または11バック中なら、強さが逆になる
     private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
-    // ★ カードの強さを数値化するメソッド
-    private int pendingSkipCount = 0;
 
-    private bool isSevenPassMode = false;   // 7渡しモード中か
-    private bool isTenDiscardMode = false;  // 10捨てモード中か
-    private int pendingActionCardCount = 0; // 渡す/捨てる枚数
     public void SetForbidSpecialWin(bool value)
     {
         forbidSpecialWin = value;
         Debug.Log($"禁止あがりルールが {(value ? "ON" : "OFF")} に設定されました。");
     }
+
+    // ★カードの強さを数値化するメソッド (修正: Jokerを最強に設定)
     public int GetCardStrength(int rank)
     {
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
-        // 内部データ: 3=3 ... 13=13, 14=A, 15=2 (と仮定)
+        // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16=Joker
 
-        // まず基本の強さに変換 (3が最弱=0, 2が最強=12 とするような補正)
         int power = 0;
-        if (rank == 15) power = 13; // 2
+        if (rank == 16) power = 14; // Joker (最強)
+        else if (rank == 15) power = 13; // 2
         else if (rank == 14) power = 12; // A
         else power = rank - 3; // 3 => 0, 4 => 1 ... 13(K) => 10
 
@@ -101,6 +98,13 @@ public class GameManager : MonoBehaviour
         }
         return power;
     }
+
+    // 現在のカード強さ比較用変数 (5飛ばし等用)
+    private int pendingSkipCount = 0;
+
+    private bool isSevenPassMode = false;   // 7渡しモード中か
+    private bool isTenDiscardMode = false;  // 10捨てモード中か
+    private int pendingActionCardCount = 0; // 渡す/捨てる枚数
 
     // ================================================
     // --- ターン制管理メソッド ---
@@ -147,12 +151,10 @@ public class GameManager : MonoBehaviour
                 StartCoroutine(NextTurnDelay());
                 return;
             }
-            // もし自分があがってしまっていたら、権限はないので下の通常進行へ流す
         }
 
         // --- 2. 通常のターン進行 ---
 
-        // ★修正: nextTurnIndex をここで宣言して計算に使います
         int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
 
         pendingSkipCount = 0; // スキップ数をリセット
@@ -213,7 +215,6 @@ public class GameManager : MonoBehaviour
         return null;
     }
 
-    // プレイヤーのカード選択状態リセット
     private void ResetPlayerSelection()
     {
         human.ClearSelectedCards();
@@ -230,9 +231,6 @@ public class GameManager : MonoBehaviour
         StartTurn();
     }
 
-    // ================================================
-    // --- CPUのターン処理 ---
-    // ================================================
     private IEnumerator CpuPlayTurn(int cpuIndex)
     {
         var cpu = cpuPlayers[cpuIndex];
@@ -259,11 +257,27 @@ public class GameManager : MonoBehaviour
 
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
 
-        // （EndTurn() はカードを選び終わった後の Execute...Action で呼ばれるため）
+        // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
         if (isSevenPassMode || isTenDiscardMode)
         {
             yield break;
         }
+
+        // ★追加修正: スペード3返しなどで場が流れた場合（lastPlayedCards.Count == 0）、
+        // ClearTableAndRestart() の中で既に StartTurn() が呼ばれているため、
+        // ここで EndTurn() を呼ぶとターンが二重に進んでしまい、次のプレイヤーがスキップされます。
+
+        // 8切りは lastPlayedCards.Count == 0 かつ skipTurnAdvance が true に設定され、EndTurn() に到達させる必要があります。
+        // それ以外の場で流れたケース（スペード3返し、全員パス後のClearTableAndRestart）は StartTurn() が呼ばれているため、ここで終了させます。
+        bool clearedBySpade3OrPass = lastPlayedCards.Count == 0 && !skipTurnAdvance;
+
+        if (clearedBySpade3OrPass)
+        {
+            // ClearTableAndRestart() が StartTurn() を呼び、次のプレイヤーにターンが移っているため、
+            // ここで EndTurn() を呼ぶと二重にターンが進んでしまうのを防ぐため break します。
+            yield break;
+        }
+
         yield return new WaitForSeconds(0.8f);
         EndTurn();
     }
@@ -292,28 +306,43 @@ public class GameManager : MonoBehaviour
 
         if (!isFieldStair)
         {
+            // ★追加: 相手がジョーカー単体の場合、スペードの3を持っていれば出す
+            // (通常はJokerが最強なので、これ以外のカードは出せない)
+            if (fieldCount == 1 && field[0].IsJoker())
+            {
+                var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
+                if (spade3 != null)
+                {
+                    return new List<Card> { spade3 };
+                }
+                // スペード3がなければ、ジョーカーには勝てないのでパス(空リスト返却)
+                return new List<Card>();
+            }
+
+            // 通常処理
             var fieldStrength = GetCardStrength(fieldRank);
+
+            // ジョーカー単体の場合、fieldRankはどうなっているか？
+            // 実際のロジックでは IsValidPlay 側で Joker = 16 と判定するが、
+            // ここでは field[0].Rank を見ている。Cardクラスの定義によるが、
+            // JokerのRankが適切に設定されていないと fieldStrength がおかしくなる可能性がある。
+            // ただし上の if (IsJoker) ブロックで処理しているので、ここはJoker以外が流れてくる想定。
 
             var candidates = hand
                 .GroupBy(c => c.Rank)
-                .Where(g => g.Count() >= fieldCount && GetCardStrength(g.Key) > fieldStrength) // ★ここ修正
-                .OrderBy(g => GetCardStrength(g.Key)) // ★弱い順に出す
+                .Where(g => g.Count() >= fieldCount && GetCardStrength(g.Key) > fieldStrength)
+                .OrderBy(g => GetCardStrength(g.Key)) // 弱い順に出す
                 .FirstOrDefault();
 
             return candidates?.Take(fieldCount).ToList() ?? new List<Card>();
         }
         else
         {
-            // 階段の場合の革命対応は少し複雑ですが、基本は「一番強いカード」の比較
-            // ここでは簡易的に Rank の大小だけで比較してしまっている既存コードだと革命時バグります。
-            // 階段の革命対応まで厳密にやるならここも修正が必要です。
+            // 階段の処理（省略・既存通り）
         }
         return new List<Card>();
     }
 
-    // ================================================
-    // --- 手札内から階段（連番）候補を探す ---
-    // ================================================
     private List<List<Card>> FindStairSequences(List<Card> hand)
     {
         List<List<Card>> stairs = new();
@@ -349,9 +378,6 @@ public class GameManager : MonoBehaviour
         return stairs;
     }
 
-    // ================================================
-    // --- 階段（連番）判定 ---
-    // ================================================
     private bool IsStair(List<Card> cards)
     {
         if (cards == null || cards.Count < 3) return false;
@@ -401,28 +427,23 @@ public class GameManager : MonoBehaviour
         players.AddRange(cpuPlayers);
 
         remainingPlayers = new List<PlayerBase>(players);
-        currentGameCount = 1; // ゲーム数リセット
+        currentGameCount = 1;
 
-        //特殊ルール
         rules.Add(new EightCutRule());
         rules.Add(new RevolutionRule());
         rules.Add(new ElevenBackRule());
         rules.Add(new FiveSkipRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
-
-        // StartTurn();
     }
     void Update()
     {
-        // ゲームが進行中でボタンの設定がある場合のみ実行
         if (playButton != null && passButton != null)
         {
             UpdateButtonVisibility();
         }
     }
 
-    // ボタンの表示/非表示を管理するメソッド
     private void UpdateButtonVisibility()
     {
         if (!isPlayerTurn)
@@ -436,11 +457,6 @@ public class GameManager : MonoBehaviour
         {
             playButton.gameObject.SetActive(true);
 
-            // --- 以下、自分のターンの処理 ---
-
-            // ================================================================
-            // ★ 特殊モードのボタン制御
-            // ================================================================
             if (isSevenPassMode || isTenDiscardMode)
             {
                 if (playButton != null)
@@ -450,20 +466,15 @@ public class GameManager : MonoBehaviour
                     int selectedCount = human.SelectCards(human.Hand).Count;
                     int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-                    // 選択枚数が指定枚数と一致した時のみボタン有効
                     playButton.interactable = (selectedCount == required);
                 }
                 if (passButton != null) passButton.gameObject.SetActive(false);
                 return;
             }
-            // ================================================================
 
-            // 2. プレイボタンの制御 (通常時)
             if (playButton != null)
             {
                 playButton.gameObject.SetActive(true);
-
-                // 通常モードでは、役が成立している場合のみボタン有効にするロジックをここに書く
                 var selected = human.SelectCards(human.Hand);
                 if (selected.Count > 0)
                 {
@@ -471,14 +482,10 @@ public class GameManager : MonoBehaviour
                 }
                 else
                 {
-                    // 何も選んでいなければボタン無効
                     playButton.interactable = false;
                 }
             }
 
-            // 3. パスボタンの制御
-            // 場にカードがない（null または 0枚）＝ 自分が親（最初に出す人）
-            // 親ならパスできないので非表示、それ以外（場にカードがある）なら表示
             if (passButton != null)
             {
                 bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
@@ -487,13 +494,11 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // 手札の中に「選択状態」のカードがあるかチェックする
     private bool IsAnyCardSelected()
     {
         foreach (Transform child in handAreaPlayer)
         {
             var cv = child.GetComponent<CardView>();
-            // 注意: CardViewスクリプトに IsSelected プロパティ(bool)がある前提です
             if (cv != null && cv.IsSelected)
             {
                 return true;
@@ -502,7 +507,6 @@ public class GameManager : MonoBehaviour
         return false;
     }
 
-    // 手札スロットを自動生成
     private void CreatePlayerCardSlots(int slotCount)
     {
         foreach (Transform child in handAreaPlayer)
@@ -525,7 +529,6 @@ public class GameManager : MonoBehaviour
         Debug.Log($"[CreatePlayerCardSlots] スロット生成: {playerCardSlots.Count}個");
     }
 
-    // プレイヤー初期化
     void InitPlayers()
     {
         human = new HumanPlayer { Name = "You" };
@@ -536,7 +539,6 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // デッキ作成と配布
     void DealInitialCards()
     {
         var deck = CreateDeck();
@@ -556,7 +558,6 @@ public class GameManager : MonoBehaviour
         PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
     }
 
-    // デッキ生成（3～15 + Joker）
     List<Card> CreateDeck()
     {
         var deck = new List<Card>();
@@ -575,7 +576,6 @@ public class GameManager : MonoBehaviour
         return deck;
     }
 
-    // シャッフル
     void Shuffle(List<Card> deck)
     {
         for (int i = 0; i < deck.Count; i++)
@@ -585,7 +585,6 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // 手札UI生成
     public void PopulatePlayerHand(HumanPlayer player)
     {
         Debug.Log($"[PopulatePlayerHand] 呼ばれた / 手札枚数: {player.Hand.Count}");
@@ -595,23 +594,17 @@ public class GameManager : MonoBehaviour
 
         player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
 
-        // ================================================================
-        // ★ 修正箇所: 7渡し/10捨てモードの場合は、全カードを選択可能にする
-        // ================================================================
         List<Card> playableCards;
 
         if (isSevenPassMode || isTenDiscardMode)
         {
-            // 特殊アクションモード中は、手札全てが選択可能
             playableCards = new List<Card>(player.Hand);
         }
         else
         {
-            // 通常のプレイモード
             var tableCards = (lastPlayedCards == null || lastPlayedCards.Count == 0) ? null : lastPlayedCards;
             playableCards = GetLegalCardsForUI(player.Hand, tableCards);
         }
-        // ================================================================
 
         for (int i = 0; i < player.Hand.Count; i++)
         {
@@ -654,7 +647,6 @@ public class GameManager : MonoBehaviour
             }
             else if (isCpu2)
             {
-                // CPU2 だけカードを縦向きにする
                 RectTransform rect = go.GetComponent<RectTransform>();
                 rect.localRotation = Quaternion.Euler(0, 0, 180f);
             }
@@ -662,17 +654,12 @@ public class GameManager : MonoBehaviour
         }
     }
 
-
-
     private IEnumerator PlayerPlayRoutine(List<Card> played)
     {
         yield return StartCoroutine(DisplayPlayedCardsOnTable(human, played));
 
-        // ★ 修正箇所: 特殊モードが起動したら、EndTurn()を呼ばずに入力待ちに入る
         if (isSevenPassMode || isTenDiscardMode)
         {
-            // EndTurn()は特殊アクション完了時（Execute...Actionの最後）に呼ばれるので、
-            // ここでは何もしない（プレイヤーの次の入力（OnPlayButton）を待つ）
             yield break;
         }
 
@@ -683,11 +670,9 @@ public class GameManager : MonoBehaviour
     {
         if (!isPlayerTurn) return;
 
-        // --- ★ 追加: 特殊モードの処理 ---
         if (isSevenPassMode)
         {
             var selected = human.SelectCards(human.Hand);
-            // 選択枚数が足りているかチェック
             int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
             if (selected.Count != required)
@@ -716,9 +701,7 @@ public class GameManager : MonoBehaviour
             StartCoroutine(ExecuteTenDiscardAction(human, selected));
             return;
         }
-        // ----------------------------------
 
-        // 以下、既存の通常プレイ処理
         if (playButton != null && !playButton.interactable) return;
         if (playButton != null) playButton.interactable = false;
 
@@ -726,7 +709,6 @@ public class GameManager : MonoBehaviour
 
         if (played == null || played.Count == 0)
         {
-            // カードが選択されていません
             Debug.Log("カードが選択されていません。");
             if (playButton != null) playButton.interactable = true;
             return;
@@ -735,15 +717,12 @@ public class GameManager : MonoBehaviour
         if (!IsValidPlay(human.Hand, played, lastPlayedCards))
         {
             Debug.Log("そのカードは出せません。");
-            // 出せないカードだった場合は、選び直せるようにボタンを再度有効化する
             if (playButton != null) playButton.interactable = true;
             return;
         }
 
-        // 場に出す前に、数字の小さい順（昇順）に並び替える
         played = played.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
-        // 成功した場合、ボタンは無効のまま処理を進める
         StartCoroutine(PlayerPlayRoutine(played));
     }
 
@@ -751,76 +730,81 @@ public class GameManager : MonoBehaviour
     {
         if (selected == null || selected.Count == 0) return false;
 
-        // 1. 選択されたカードをリアルカードとジョーカーに分ける
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
 
-        // --- 1. 自分の出したカード単体でのチェック（役になっているか？） ---
+        // --- 単体・役のチェック ---
 
         bool isRankGroup = false;
         bool isStair = false;
 
         if (realSelected.Count == 0)
         {
-            // ジョーカー単独出し（ワイルドカードとして有効）
-            // 場が空でなければ、ワイルドカードとして場の枚数と同じ枚数の組み合わせとみなす。
             isRankGroup = (jokerCount > 0);
         }
         else
         {
-            // A. 同じ数字の組み合わせか？（ジョーカーが補完できるか？）
-            // リアルカードのランクがすべて同じであれば、ジョーカーで補完可能。
             isRankGroup = realSelected.All(c => c.Rank == realSelected[0].Rank);
-
-            // B. 階段（ジョーカーが補完できるか？）
-            // ジョーカー込みの階段判定が必要
             isStair = IsStairWithJoker(realSelected, jokerCount);
         }
 
-
-        // ★ 修正点: ペアでも階段でもないバラバラなカードなら、場が空でも出せないようにする
         if (!isRankGroup && !isStair)
         {
             return false;
         }
 
-        // --- 2. 場に出ているカードとの比較（場にカードがある場合のみ） ---
+        // --- 場に出ているカードとの比較 ---
         if (field != null && field.Count > 0)
         {
+            // ★追加: スペードの3はジョーカー単体出しに勝てるルール
+            // 場がジョーカー1枚の場合のみ
+            if (field.Count == 1 && field[0].IsJoker())
+            {
+                // 自分が出すのが「スペード」かつ「Rank3」かつ「1枚」ならOK
+                if (selected.Count == 1 && selected[0].Suit == Suit.Spade && selected[0].Rank == 3)
+                {
+                    return true;
+                }
+            }
+
             // 枚数チェック
             if (selected.Count != field.Count) return false;
 
-            // 場のリアルカードとジョーカーに分ける
             var (realField, fieldJokerCount) = GetRealCardsAndJokers(field);
-
-            // 場のタイプ判定
             bool fieldIsStair = IsStairWithJoker(realField, fieldJokerCount);
 
-            // 場のタイプと出したカードのタイプが合っているか
             if (fieldIsStair != isStair) return false;
 
-
-            // 強さチェック
             int selectedStrongestRank;
             int fieldStrongestRank;
 
-            if (isStair) // 階段の強さ比較
+            if (isStair)
             {
-                // 階段の強さ比較は、一番強いカードのランクで比較します。
-                // ジョーカーは「代わりになったカード」として評価する必要がありますが、
-                // 簡易的にリアルカードの最大ランク+ジョーカー枚数で強さを推定します。
                 selectedStrongestRank = GetStairMaxRank(realSelected, jokerCount);
                 fieldStrongestRank = GetStairMaxRank(realField, fieldJokerCount);
             }
-            else // ペア・単体の強さ比較
+            else
             {
-                // 場のランク（ジョーカーはリアルカードと同じランクとみなす）
-                fieldStrongestRank = realField.Count > 0 ? realField[0].Rank : 3; // 場がジョーカーのみなら3とみなす
+                // 場がジョーカーのみの場合は最強(Rank 16相当)とする
+                if (realField.Count == 0 && fieldJokerCount > 0)
+                {
+                    fieldStrongestRank = 16;
+                }
+                else
+                {
+                    fieldStrongestRank = realField.Count > 0 ? realField[0].Rank : 3;
+                }
 
-                // 出したカードのランク
-                selectedStrongestRank = realSelected.Count > 0 ? realSelected[0].Rank : 3; // 出したのがジョーカーのみなら3とみなす
+                // 自分が出すカードがジョーカーのみの場合は最強(Rank 16相当)とする
+                if (realSelected.Count == 0 && jokerCount > 0)
+                {
+                    selectedStrongestRank = 16;
+                }
+                else
+                {
+                    selectedStrongestRank = realSelected.Count > 0 ? realSelected[0].Rank : 3;
+                }
             }
 
-            // 最終的な強さ比較
             int fieldStrength = GetCardStrength(fieldStrongestRank);
             int selectedStrength = GetCardStrength(selectedStrongestRank);
 
@@ -834,53 +818,38 @@ public class GameManager : MonoBehaviour
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
         int totalCards = realCards.Count + jokerCount;
-        // 階段は最低3枚必要
         if (totalCards < 3) return false;
 
-        // 1. ジョーカーのみで3枚以上なら階段成立（特殊なケース）
         if (realCards.Count == 0)
         {
             return jokerCount >= 3;
         }
 
-        // 2. リアルカードのスートがすべて同じかチェック
         if (realCards.Select(c => c.Suit).Distinct().Count() > 1)
         {
             return false;
         }
 
-        // 3. リアルカードのランクを昇順かつ重複なしで取得 (※int型のリストとして取得できているか重要)
         var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
 
-        // 4. リアルカードの間隔と、連番の合計長をチェック
         int requiredJokers = 0;
 
-        // リアルカードの間隔に必要なジョーカー数を計算
         for (int i = 0; i < sortedRanks.Count - 1; i++)
         {
             int gap = sortedRanks[i + 1] - sortedRanks[i] - 1;
-
             if (gap < 0) return false;
-
             requiredJokers += gap;
         }
 
-        // 5. ジョーカーの枚数が、リアルカード間のギャップを埋めるのに十分か
         if (jokerCount < requiredJokers)
         {
-            return false; // ジョーカーが足りない
+            return false;
         }
 
-        // 6. ギャップを埋めた後、残ったジョーカーで連番を伸ばす
         int remainingJokers = jokerCount - requiredJokers;
-
-        // リアルカードだけでできている連番の長さ
         int realStairLength = sortedRanks.Count;
-
-        // 合計の階段の長さ = (リアルカード数) + (ギャップを埋めたジョーカー数) + (残りで伸ばせるジョーカー数)
         int finalStairLength = realStairLength + requiredJokers + remainingJokers;
 
-        // 7. 最終的な長さが3枚以上か
         return finalStairLength >= 3;
     }
 
@@ -888,34 +857,19 @@ public class GameManager : MonoBehaviour
     {
         if (realCards.Count == 0)
         {
-            // ジョーカーのみの場合、とりあえず最強の2の代わりになったと仮定
-            // (この処理は厳密ではありませんが、2出しより強い階段はないため)
             return 15;
         }
 
-        // リアルカードの最大ランク
         int maxRealRank = realCards.Max(c => c.Rank);
-
-        // ジョーカーの数が、リアルカードの最大ランクより上に連番を作れるだけあるか
-        // 例: (3, 4) + Joker2枚 の場合、(3, 4, 5, 6)となり、最大ランクは6
-
-        // リアルカードが連番の場合、ジョーカーの数だけ上に伸ばせる
-        var sortedRanks = realCards.OrderBy(c => c.Rank).ToList();
-
-        // 簡易的に、ジョーカーはすべて連番の「上」に繋がると仮定します
-        // （複雑な階段ロジックを避け、強さ比較の目的を果たすため）
         return maxRealRank + jokerCount;
     }
 
-
-    //パスボタン処理
     private void OnPassButton()
     {
         if (players[currentTurnIndex] != humanPlayer) return;
         HandlePass();
     }
 
-    // 場にカードを出す
     private IEnumerator DisplayPlayedCardsOnTable(PlayerBase currentPlayer, List<Card> played)
     {
         float spacing = 20f;
@@ -937,6 +891,10 @@ public class GameManager : MonoBehaviour
 
         List<CardView> allCardViews = sourceArea.GetComponentsInChildren<CardView>().ToList();
         var playedViews = new List<CardView>();
+
+        // --- プレイ前の場のカードを一時保存 (スペード3返しの判定に使う) ---
+        List<Card> fieldBeforePlay = new List<Card>(lastPlayedCards);
+
 
         for (int i = 0; i < played.Count; i++)
         {
@@ -1018,16 +976,38 @@ public class GameManager : MonoBehaviour
             RemovePlayedCardsFromUI(played);
         }
         CheckForWin(currentPlayer);
-        if (isGameOver) yield break; // ゲーム終了ならここで中断
-
-        // あがりカードの特殊効果（8切りなど）は有効にするため、ここでは抜けない
-        // ただし、7渡し/10捨ては手札が必要なので、以下のブロック内でガードする
+        if (isGameOver) yield break;
 
         lastPlayedCards = new List<Card>(played);
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
         passCount = 0;
 
-        // 1. GameState作成とルールの適用
+        // ★★★ スペード3返しのチェックと強制流し処理 ★★★
+        bool isSpade3Counter = false;
+
+        // 場のカードがジョーカー1枚 (fieldBeforePlayを使う)
+        if (fieldBeforePlay.Count == 1 && fieldBeforePlay[0].IsJoker())
+        {
+            // 出したカードがスペード3の1枚出し
+            if (played.Count == 1 && played[0].Suit == Suit.Spade && played[0].Rank == 3)
+            {
+                isSpade3Counter = true;
+            }
+        }
+
+        if (isSpade3Counter)
+        {
+            EnqueueMessage("スペード3返し！場が流れます。");
+            // ★修正: 強制流しの前に一時的な革命状態をリセット
+            isTempRevolution = false;
+
+            // 強制的に場を流す (lastPlayedPlayerIndexに基づいて次のターン開始プレイヤーが決定される)
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break; // 強制流し後は通常のターン終了処理（EndTurn）をスキップ
+        }
+
+
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
@@ -1039,35 +1019,23 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // 2. ルール適用結果の処理
-        // ★修正方針: 8切り（場を流す）を優先し、その後 7渡し/10捨て（アクション）を行う
-        // 　8切りが発生した場合、skipTurnAdvanceフラグを立てるが、
-        // 　7渡し/10捨てのシーケンスに入った場合は、その完了後にフラグを消さないように注意する
-
-        // --- 革命 ---
         if (state.TriggerRevolution)
         {
             isRevolution = !isRevolution;
             EnqueueMessage(isRevolution ? "革命開始!" : "革命終了!");
         }
 
-        // --- 11バック ---
         if (state.IsElevenBack)
         {
             EnqueueMessage("11バック!");
             isTempRevolution = true;
         }
 
-        // --- 5飛ばし ---
         pendingSkipCount = state.SkipCount;
         if (pendingSkipCount > 0)
         {
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
-
-        // ================================================================
-        // ★ 優先順位変更: 8切り判定と処理を先頭に持ってくる
-        // ================================================================
 
         bool eightCutTriggered = state.IsEightCut;
 
@@ -1075,77 +1043,57 @@ public class GameManager : MonoBehaviour
         {
             EnqueueMessage("8切り!");
 
-            // 8切りなので場を流す
             yield return new WaitForSeconds(1.0f);
             foreach (Transform child in tableArea) Destroy(child.gameObject);
             lastPlayedCards.Clear();
             passCount = 0;
 
-            // 場が流れたので、スキップや11バックの状態もリセット
             pendingSkipCount = 0;
+            // 8切りでも一時的な革命状態をリセット
             isTempRevolution = false;
 
-            // 8切りなら「もう一度自分のターン」フラグを立てる
-            // ただし、あがっていた場合はターンは回ってこない
             if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
             {
                 skipTurnAdvance = true;
             }
-
-            // ★ここでは yield break せず、続けて 7渡し/10捨て のチェックを行う
         }
 
-        // --- 7渡し ---
-        // あがっていない場合のみ（渡すカードが必要）
         if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
             Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
 
-            // 7渡しモードへ移行
             isSevenPassMode = true;
             pendingActionCardCount = state.SevenPassCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleSevenPassSequence(currentPlayer));
 
-            // 入力待ちになるのでここで中断
             yield break;
         }
 
-        // --- 10捨て ---
-        // あがっていない場合のみ（捨てるカードが必要）
         if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
             Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
 
-            // 10捨てモードへ移行
             isTenDiscardMode = true;
             pendingActionCardCount = state.TenDiscardCount;
 
             yield return new WaitForSeconds(1.0f);
             StartCoroutine(HandleTenDiscardSequence(currentPlayer));
 
-            // 入力待ちになるのでここで中断
             yield break;
         }
 
-        // 7渡しも10捨ても発生しなかった場合の 8切り後処理
         if (eightCutTriggered)
         {
-            // アクションがない場合はここで EndTurn フローに戻るが、
-            // skipTurnAdvance が true なら EndTurn 内で自己ループ処理される
-            // (CPUやPlayerルーチンの最後で EndTurn が呼ばれる)
+            // skipTurnAdvance true なら EndTurn でループ
         }
 
-        // 何も特殊アクションがなければ通常通りターン終了
         if (pendingSkipCount > 0)
         {
-            // 演出のみ
         }
 
-        // 注意: このメソッド自体は呼び出し元に戻り、呼び出し元が EndTurn() を呼ぶかどうか判断する
     }
-
 
     private void RemovePlayedCardsFromUI(List<Card> played)
     {
@@ -1160,8 +1108,7 @@ public class GameManager : MonoBehaviour
     {
         passCount++;
 
-        // ★修正: 残っている人数 - 1 人がパスしたら流れる
-        if (passCount >= remainingPlayers.Count - 1) // ※自分以外の全員
+        if (passCount >= remainingPlayers.Count - 1)
         {
             StartCoroutine(ClearTableAndRestart());
         }
@@ -1180,11 +1127,16 @@ public class GameManager : MonoBehaviour
         lastPlayedCards.Clear();
         passCount = 0;
 
-        isTempRevolution = false; // 場が流れたら11バック終了
+        // ★修正: 場が流れた際に一時的な革命状態をリセット
+        isTempRevolution = false;
+
+        // ★修正 (追加): 場が流れた際には、保留中のスキップやターン継続フラグもリセットして、
+        // 次のプレイヤーへのターン移動を確実に正規化します。
+        pendingSkipCount = 0;
+        skipTurnAdvance = false;
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
-        // lastPlayedPlayerIndex の人がまだいるかチェック
         PlayerBase lastPlayer = players[lastPlayedPlayerIndex];
 
         if (remainingPlayers.Contains(lastPlayer))
@@ -1193,7 +1145,6 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            // あがっていた場合、その次の「まだいる人」を親にする
             int nextIdx = (lastPlayedPlayerIndex + 1) % players.Count;
             while (!remainingPlayers.Contains(players[nextIdx]))
             {
@@ -1255,11 +1206,10 @@ public class GameManager : MonoBehaviour
 
         while (messageQueue.Count > 0)
         {
-            // ★追加: 7渡しまたは10捨てモード中は、キューの処理を一時停止する
             if (isSevenPassMode || isTenDiscardMode)
             {
                 yield return null;
-                continue; // ループを続行し、モードが解除されるのを待つ
+                continue;
             }
 
             string message = messageQueue.Dequeue();
@@ -1302,7 +1252,6 @@ public class GameManager : MonoBehaviour
         isShowingMessage = false;
     }
 
-    // 8切り判定
     private bool IsEightCut(List<Card> played)
     {
         if (played == null || played.Count == 0) return false;
@@ -1310,8 +1259,6 @@ public class GameManager : MonoBehaviour
     }
     private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
     {
-        // 1. 場が空なら、全て出せる（ことにしておく）
-        // ※本来は役成立チェックが必要ですが、UIハイライトとしては全点灯が一般的です
         if (field == null || field.Count == 0)
         {
             return new List<Card>(hand);
@@ -1320,25 +1267,55 @@ public class GameManager : MonoBehaviour
         List<Card> playable = new List<Card>();
         int fieldCount = field.Count;
 
-        // 場の最強ランク（階段の場合は一番強いカード、ペア等は数字）
-        // ※階段の場合、簡易的に「一番強いランク」で比較します
-        int fieldStrongestRank = field.Max(c => c.Rank);
+        // ★UI用: ジョーカー単体の場合は最強(16)とする
+        int fieldStrongestRank;
+        if (field.Count == 1 && field[0].IsJoker())
+        {
+            fieldStrongestRank = 16;
+        }
+        else
+        {
+            fieldStrongestRank = field.Max(c => c.Rank);
+        }
+
         int fieldStrength = GetCardStrength(fieldStrongestRank);
 
         bool isFieldStair = IsStair(field);
 
-        if (isFieldStair)
+        if (!isFieldStair)
         {
-            // --- 階段の場合 ---
-            // 手札から階段を探す
+            // ★スペード3のチェック
+            // 場がジョーカー単体なら、手札にスペード3があれば出す候補に入れる
+            if (field.Count == 1 && field[0].IsJoker())
+            {
+                var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
+                if (spade3 != null) playable.Add(spade3);
+            }
+
+            var groups = hand.GroupBy(c => c.Rank);
+
+            foreach (var g in groups)
+            {
+                // ★重要: スペード3が普通の3として出せるのは、場がジョーカーでない場合のみ。
+                // 既にジョーカー単体の場合は上のifブロックでスペード3のみがチェックされている。
+                // ここでは普通の3としての処理を継続。
+                if (g.Count() >= fieldCount)
+                {
+                    if (GetCardStrength(g.Key) > fieldStrength)
+                    {
+                        playable.AddRange(g);
+                    }
+                }
+            }
+        }
+        else
+        {
             var stairs = FindStairSequences(hand);
             foreach (var seq in stairs)
             {
-                // 枚数が同じで、かつ マークも同じ必要がある（ローカルルールによるが一般的に）
                 if (seq.Count != fieldCount) continue;
                 if (seq[0].Suit != field[0].Suit) continue;
 
-                // 強さ比較
                 int seqStrongestRank = seq.Max(c => c.Rank);
                 if (GetCardStrength(seqStrongestRank) > fieldStrength)
                 {
@@ -1346,64 +1323,34 @@ public class GameManager : MonoBehaviour
                 }
             }
         }
-        else
-        {
-            // --- 単体 または ペア/トリプルの場合 ---
-            // 手札をランクごとにグループ化
-            var groups = hand.GroupBy(c => c.Rank);
-
-            foreach (var g in groups)
-            {
-                // 枚数が足りているか
-                if (g.Count() >= fieldCount)
-                {
-                    // 強さが場より上か (革命・11バックを考慮した GetCardStrength を使用)
-                    if (GetCardStrength(g.Key) > fieldStrength)
-                    {
-                        // 条件を満たすランクのカードはすべて候補とする
-                        playable.AddRange(g);
-                    }
-                }
-            }
-        }
 
         return playable;
     }
 
-    /// <summary>
-    /// ルール判定用に、ジョーカーを具体的なランクのカードに変換したリストを生成する
-    /// (例: [6, 7, Joker] -> [6, 7, 8])
-    /// </summary>
     private List<Card> GetEffectivePlayedCards(List<Card> original)
     {
         if (original == null || original.Count == 0) return new List<Card>();
 
-        // リアルカード（ジョーカー以外）を抽出してソート
         var realCards = original.Where(c => !c.IsJoker()).OrderBy(c => c.Rank).ToList();
         int jokerCount = original.Count - realCards.Count;
 
-        // ジョーカーがない場合はコピーをそのまま返す
         if (jokerCount == 0) return new List<Card>(original);
 
-        // ジョーカーのみの場合 (とりあえず最強カード扱いで処理、例: Rank 15=2)
         if (realCards.Count == 0)
         {
             var list = new List<Card>();
             for (int i = 0; i < jokerCount; i++)
             {
-                // ここでは仮に最強の2(15)として扱います
                 list.Add(new Card { Rank = 15, Suit = Suit.Spade });
             }
             return list;
         }
 
-        // --- A. ペア・トリプル等の判定 (実カードのランクが全て同じ) ---
         bool isGroup = realCards.All(c => c.Rank == realCards[0].Rank);
         if (isGroup)
         {
             var list = new List<Card>(realCards);
             int rank = realCards[0].Rank;
-            // ジョーカーをそのランクのカードとして生成して追加
             for (int i = 0; i < jokerCount; i++)
             {
                 list.Add(new Card { Rank = rank, Suit = realCards[0].Suit });
@@ -1411,18 +1358,13 @@ public class GameManager : MonoBehaviour
             return list;
         }
 
-        // --- B. 階段の判定 (実カードが連番、または飛び番) ---
-        // 実カードの隙間を埋め、余ったら上に足す処理を行う
         var effectiveList = new List<Card>();
-
-        // 最初のカード
         int currentRank = realCards[0].Rank;
         effectiveList.Add(realCards[0]);
 
         int realIndex = 1;
         int usedJokers = 0;
 
-        // 実カードの間をチェックして埋める
         while (realIndex < realCards.Count)
         {
             int nextRealRank = realCards[realIndex].Rank;
@@ -1430,7 +1372,6 @@ public class GameManager : MonoBehaviour
 
             if (gap > 0)
             {
-                // ギャップをジョーカーで埋める
                 for (int k = 0; k < gap; k++)
                 {
                     if (usedJokers < jokerCount)
@@ -1442,13 +1383,11 @@ public class GameManager : MonoBehaviour
                 }
             }
 
-            // 次の実カードを追加
             currentRank = nextRealRank;
             effectiveList.Add(realCards[realIndex]);
             realIndex++;
         }
 
-        // 余ったジョーカーは連番の「上」に足す (例: 6,7 + Joker -> 6,7,8)
         while (usedJokers < jokerCount)
         {
             currentRank++;
@@ -1458,49 +1397,34 @@ public class GameManager : MonoBehaviour
 
         return effectiveList;
     }
-    // ================================================================
-    // --- 7渡し / 10捨て 処理ロジック ---
-    // ================================================================
 
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
-        // ★修正: EnqueueMessageを使わず、メッセージを直接永続表示させる
         string message = $"7渡し! {pendingActionCardCount}枚選んでください";
 
         if (player is HumanPlayer)
         {
-            // HumanPlayerの場合は直接テキストを設定
             passMessageText.text = message;
-            passMessageText.gameObject.SetActive(true); // 表示を継続
+            passMessageText.gameObject.SetActive(true);
 
-            // 1. カード選択状態をリセット
             ResetPlayerSelection();
-
-            // 2. 手札の枚数に合わせてスロットを再生成
             CreatePlayerCardSlots(human.Hand.Count);
-
-            // 3. 手札を再描画し、全てのカードを選択可能にする
             PopulatePlayerHand(human);
 
-            // プレイヤー入力待ちモードへ
-            if (passButton != null) passButton.interactable = false; // パスはできない
+            if (passButton != null) passButton.interactable = false;
             if (playButton != null)
             {
-                playButton.interactable = false; // 選択するまで押せない
+                playButton.interactable = false;
                 playButton.GetComponentInChildren<TextMeshProUGUI>().text = "あげる";
             }
-
-            // プレイヤーがカードを選んで「あげる」ボタンを押すのを待つ
             yield break;
         }
         else
         {
-            // CPUの処理
-            EnqueueMessage(message); // CPUの場合は通常のメッセージフローで表示
+            EnqueueMessage(message);
             yield return new WaitForSeconds(1.0f);
 
-            var hand = player.Hand.OrderBy(c => c.Rank).ToList(); // 弱い順
-            // 枚数が足りない場合は全手札
+            var hand = player.Hand.OrderBy(c => c.Rank).ToList();
             int count = Mathf.Min(pendingActionCardCount, hand.Count);
             var cardsToPass = hand.Take(count).ToList();
 
@@ -1510,22 +1434,15 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleTenDiscardSequence(PlayerBase player)
     {
-        // ★修正: EnqueueMessageを使わず、メッセージを直接永続表示させる
         string message = $"10捨て! {pendingActionCardCount}枚選んで捨ててください";
 
         if (player is HumanPlayer)
         {
-            // HumanPlayerの場合は直接テキストを設定
             passMessageText.text = message;
-            passMessageText.gameObject.SetActive(true); // 表示を継続
+            passMessageText.gameObject.SetActive(true);
 
-            // 1. カード選択状態をリセット
             ResetPlayerSelection();
-
-            // 2. 手札の枚数に合わせてスロットを再生成 (前のターンでカードを出したため枚数が減っている)
             CreatePlayerCardSlots(human.Hand.Count);
-
-            // 3. 手札を再描画し、全てのカードを選択可能にする (PopulatePlayerHand内のロジックがisTenDiscardModeを見て全有効化する)
             PopulatePlayerHand(human);
 
             if (passButton != null) passButton.interactable = false;
@@ -1534,13 +1451,11 @@ public class GameManager : MonoBehaviour
                 playButton.interactable = false;
                 playButton.GetComponentInChildren<TextMeshProUGUI>().text = "捨てる";
             }
-            // プレイヤー入力待ち
             yield break;
         }
         else
         {
-            // CPUの処理
-            EnqueueMessage(message); // CPUの場合は通常のメッセージフローで表示
+            EnqueueMessage(message);
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
@@ -1551,32 +1466,26 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // 実際にカードを移動させる処理（7渡し）
     public IEnumerator ExecuteSevenPassTransfer(PlayerBase fromPlayer, List<Card> cards)
     {
-        // 次のプレイヤーを特定
         int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
         PlayerBase toPlayer = players[nextIndex];
 
         Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
 
-        // アニメーション用（簡易）: 手札から消して、相手の手札へ
         foreach (var card in cards)
         {
             fromPlayer.Hand.Remove(card);
             toPlayer.Hand.Add(card);
 
-            // UI更新: 自分の手札からカードが消えた場合の処理
             if (fromPlayer is HumanPlayer)
             {
                 RemovePlayedCardsFromUI(new List<Card> { card });
             }
         }
 
-        // 相手がHumanなら手札再描画、CPUなら裏面再描画
         if (toPlayer is HumanPlayer)
         {
-            // カードを受け取って手札枚数が変わったため、スロットを再生成する
             CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
         }
@@ -1590,7 +1499,6 @@ public class GameManager : MonoBehaviour
             if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, toPlayer.Hand.Count);
         }
 
-        // 自分がCPUでカードが減った場合も再描画
         if (fromPlayer is not HumanPlayer)
         {
             Transform cpuArea = fromPlayer.handArea;
@@ -1599,57 +1507,39 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
-        // ==========================================================
-        // ★★★ 修正・追加: あがり判定ロジックの挿入 ★★★
-        // ==========================================================
-
-        // 特殊ルールによるあがりが禁止されており、かつ今回のアクションで手札が0になる場合
-        // ※ fromPlayer の手札が0になっているかチェック
         if (forbidSpecialWin && fromPlayer.Hand.Count == 0)
         {
             EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています！");
-            // あがりではないので、処理を続行し EndTurn へ
         }
         else
         {
-            // 禁止されていなければ、通常通りあがり判定を行う
             CheckForWin(fromPlayer);
-            if (isGameOver) yield break; // あがったらゲーム終了コルーチンへ
+            if (isGameOver) yield break;
         }
 
-        // ==========================================================
-
-        // モード解除
         isSevenPassMode = false;
 
-        // ★追加: メッセージをクリア
         passMessageText.gameObject.SetActive(false);
         passMessageText.text = "";
 
-        // skipTurnAdvance は 8切りで立ったものなのでここで折らない
-
         ResetPlayButtonUI();
 
-        EndTurn(); // ここで通常のターン進行ルートに入り、次の人へ進む
+        EndTurn();
     }
 
-    // 実際にカードを捨てる処理（10捨て）
     public IEnumerator ExecuteTenDiscardAction(PlayerBase player, List<Card> cards)
     {
         Debug.Log($"{player.Name} は {cards.Count}枚 捨てました");
 
-        // 1. カードを手札から削除 (データ更新)
         foreach (var card in cards)
         {
             player.Hand.Remove(card);
-            // UIから削除 (HumanPlayerの場合のみ)
             if (player is HumanPlayer)
             {
                 RemovePlayedCardsFromUI(new List<Card> { card });
             }
         }
 
-        // 2. UIの再描画 (データ更新後、判定前に見た目を更新)
         if (player is not HumanPlayer)
         {
             Transform cpuArea = player.handArea;
@@ -1658,28 +1548,20 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
-        // 3. ★禁止あがり判定とあがり判定 (メイン修正箇所)
-
-        // 【禁止あがり判定】10捨てによるあがりが禁止されており、かつ手札が0枚になった場合
         if (forbidSpecialWin && player.Hand.Count == 0)
         {
             EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています！");
         }
         else
         {
-            // 禁止されていなければ、通常通りあがり判定を行う
             CheckForWin(player);
-            if (isGameOver) yield break; // あがったらゲーム終了コルーチンへ
+            if (isGameOver) yield break;
         }
 
-        // 4. モード解除とターン終了
         isTenDiscardMode = false;
 
-        // ★追加: メッセージをクリア
         passMessageText.gameObject.SetActive(false);
         passMessageText.text = "";
-
-        // skipTurnAdvance は 8切りで立ったものなのでここで折らない
 
         ResetPlayButtonUI();
 
@@ -1700,23 +1582,20 @@ public class GameManager : MonoBehaviour
     {
         if (player.Hand.Count == 0)
         {
-            // 1. 順位確定
             gameRanks[player] = currentRank;
             EnqueueMessage($"{player.Name} があがりました! ({currentRank}位)");
 
             currentRank++;
-            remainingPlayers.Remove(player); // ゲーム参加者リストから除外
+            remainingPlayers.Remove(player);
 
-            // 2. 残り1人になったらラウンド終了
             if (remainingPlayers.Count <= 1)
             {
-                // 最後の1人は自動的に最下位
                 var lastPlayer = remainingPlayers[0];
                 gameRanks[lastPlayer] = currentRank;
                 EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
 
                 isGameOver = true;
-                StartCoroutine(EndGameRoutine()); // ゲーム終了コルーチンへ
+                StartCoroutine(EndGameRoutine());
             }
         }
     }
@@ -1724,8 +1603,6 @@ public class GameManager : MonoBehaviour
     {
         yield return new WaitForSeconds(2.0f);
         EnqueueMessage($"--- 第{currentGameCount}戦 終了 ---");
-
-        // ここで順位に応じたポイント計算などをしても良い
 
         yield return new WaitForSeconds(3.0f);
 
@@ -1739,14 +1616,11 @@ public class GameManager : MonoBehaviour
         else
         {
             EnqueueMessage("全4戦終了！お疲れ様でした！");
-            // 結果表示画面へ遷移などの処理
         }
     }
 
-    // ★追加: 次のラウンドの準備
     private IEnumerator PrepareNextRound()
     {
-        // 1. 変数リセット
         isGameOver = false;
         isRevolution = false;
         isTempRevolution = false;
@@ -1755,25 +1629,20 @@ public class GameManager : MonoBehaviour
         passCount = 0;
         lastPlayedCards.Clear();
 
-        // 2. 場を掃除
         foreach (Transform child in tableArea) Destroy(child.gameObject);
 
-        // 3. 全員復活
         remainingPlayers = new List<PlayerBase>(players);
 
-        // 4. 手札リセット & 再配布
         foreach (var p in players) p.Hand.Clear();
         DealInitialCards();
 
-        // 5. UI再構築
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
 
-        // 6. 順番決め（大貧民から、などのルールがあればここで currentTurnIndex を設定）
-        // ここではとりあえずランダム、または前の勝者など固定でも可
-        currentTurnIndex = 0; // 仮：またプレイヤーから
+        currentTurnIndex = 0;
 
         yield return new WaitForSeconds(1.0f);
         StartTurn();
     }
+
 }
