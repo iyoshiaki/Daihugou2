@@ -1071,6 +1071,34 @@ public class GameManager : MonoBehaviour
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
+        // --- 7渡し ---
+        // 手動計算をやめて state.SevenPassCount を見る
+        if (state.SevenPassCount > 0)
+        {
+            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
+            skipTurnAdvance = true;
+            isSevenPassMode = true;
+            pendingActionCardCount = state.SevenPassCount;
+
+            yield return new WaitForSeconds(1.0f);
+            StartCoroutine(HandleSevenPassSequence(currentPlayer));
+            yield break;
+        }
+
+        // --- 10捨て ---
+        // 手動計算をやめて state.TenDiscardCount を見る
+        if (state.TenDiscardCount > 0)
+        {
+            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
+            skipTurnAdvance = true;
+            isTenDiscardMode = true;
+            pendingActionCardCount = state.TenDiscardCount;
+
+            yield return new WaitForSeconds(1.0f);
+            StartCoroutine(HandleTenDiscardSequence(currentPlayer));
+            yield break;
+        }
+
         // --- 8切り ---
         // さっき修正した state.IsEightCut フラグを見る
         if (state.IsEightCut)
@@ -1104,34 +1132,6 @@ public class GameManager : MonoBehaviour
                 StartCoroutine(ClearTableAndRestart());
                 yield break;
             }
-        }
-
-        // --- 7渡し ---
-        // 手動計算をやめて state.SevenPassCount を見る
-        if (state.SevenPassCount > 0)
-        {
-            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
-            skipTurnAdvance = true;
-            isSevenPassMode = true;
-            pendingActionCardCount = state.SevenPassCount;
-
-            yield return new WaitForSeconds(1.0f);
-            StartCoroutine(HandleSevenPassSequence(currentPlayer));
-            yield break;
-        }
-
-        // --- 10捨て ---
-        // 手動計算をやめて state.TenDiscardCount を見る
-        if (state.TenDiscardCount > 0)
-        {
-            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
-            skipTurnAdvance = true;
-            isTenDiscardMode = true;
-            pendingActionCardCount = state.TenDiscardCount;
-
-            yield return new WaitForSeconds(1.0f);
-            StartCoroutine(HandleTenDiscardSequence(currentPlayer));
-            yield break;
         }
     }
 
