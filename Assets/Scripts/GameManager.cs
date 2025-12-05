@@ -831,10 +831,12 @@ public class GameManager : MonoBehaviour
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
         int totalCards = realCards.Count + jokerCount;
-        if (totalCards < 3) return false;
+        // ★修正: 合計枚数を3枚または4枚に制限
+        if (totalCards < 3 || totalCards > 4) return false;
 
         if (realCards.Count == 0)
         {
+            // ジョーカーのみで階段を構成する場合 (例: J-J-J => 3枚階段)
             return jokerCount >= 3;
         }
 
@@ -863,7 +865,8 @@ public class GameManager : MonoBehaviour
         int realStairLength = sortedRanks.Count;
         int finalStairLength = realStairLength + requiredJokers + remainingJokers;
 
-        return finalStairLength >= 3;
+        // ★修正: 既に totalCards でチェックしているが、ロジックの確認のため再度チェック
+        return finalStairLength >= 3 && finalStairLength <= 4;
     }
 
     private int GetStairMaxRank(List<Card> realCards, int jokerCount)
