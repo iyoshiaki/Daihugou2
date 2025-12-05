@@ -658,7 +658,20 @@ public class GameManager : MonoBehaviour
     {
         yield return StartCoroutine(DisplayPlayedCardsOnTable(human, played));
 
+        // 7渡しや10捨てが開始された場合、DisplayPlayedCardsOnTableの中で処理が分岐するため、
+        // ここには到達しないはずだが、念のためガード。
         if (isSevenPassMode || isTenDiscardMode)
+        {
+            yield break;
+        }
+
+        // ★修正ポイント: スペード3返しなどにより DisplayPlayedCardsOnTable の中で場が流れた場合、
+        // ClearTableAndRestart() が呼ばれ、既に StartTurn() によってターンが再開されている。
+        // そのため、ここで EndTurn() を実行するとターンが二重に進んでしまうため、スキップする。
+        //
+        // 場が空で (lastPlayedCards.Count == 0)、かつ8切りによるターン継続ではない (!skipTurnAdvance) 
+        // 場合は、場が流れたと判断できる。
+        if (lastPlayedCards.Count == 0 && !skipTurnAdvance)
         {
             yield break;
         }
