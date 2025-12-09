@@ -1,17 +1,29 @@
 using System.Collections.Generic;
-using UnityEngine;
+using System.Linq;
 
 public class RevolutionRule : IRule
 {
-    public bool CanApply(List<Card> playedCards, GameState state)
+    public bool CanApply(List<Card> played, GameState state)
     {
-        // 4–‡ˆÈão‚³‚ê‚½‚çŠv–½
-        return playedCards.Count >= 4;
+        if (played == null || played.Count < 4) return false;
+
+        var realCards = played.Where(c => !c.IsJoker()).ToList();
+        if (realCards.Count == 0) return false;
+
+        return realCards.All(c => c.Rank == realCards[0].Rank);
     }
 
-    public void Apply(List<Card> playedCards, GameState state)
+    public void Apply(List<Card> played, GameState state)
     {
         state.TriggerRevolution = true;
-        Debug.Log("Šv–½”­¶!‹­‚³‚ª”½“]‚µ‚Ü‚·B");
+    }
+
+    /// <summary>
+    /// Šv–½ó‘Ô‚ğƒgƒOƒ‹‚·‚é
+    /// </summary>
+    public void ExecuteRevolution(GameManager gm, ref bool isRevolution)
+    {
+        isRevolution = !isRevolution;
+        gm.EnqueueMessage(isRevolution ? "Šv–½ŠJn!" : "Šv–½I—¹!");
     }
 }
