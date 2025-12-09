@@ -888,7 +888,7 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator DisplayPlayedCardsOnTable(PlayerBase currentPlayer, List<Card> played)
     {
-        float spacing = 20f;
+        float spacing = 50f;
         int existingCards = tableArea.childCount;
         Vector3 basePos = tableArea.position;
         float startX = basePos.x - (played.Count - 1) * spacing / 2f;
@@ -1588,7 +1588,7 @@ public class GameManager : MonoBehaviour
     {
         if (playButton != null)
         {
-            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "Play";
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "出す";
             playButton.interactable = false;
         }
         if (passButton != null) passButton.interactable = true;
