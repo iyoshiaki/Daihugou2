@@ -43,6 +43,8 @@ public class GameManager : MonoBehaviour
     private int passCount = 0;
     private int lastPlayedPlayerIndex = -1;
 
+    private int lastSkippedCount = 0;
+
     [SerializeField] private Button passButton;
     [SerializeField] private Button playButton;
 
@@ -1048,6 +1050,7 @@ public class GameManager : MonoBehaviour
         }
 
         pendingSkipCount = state.SkipCount;
+        lastSkippedCount = state.SkipCount;
         if (pendingSkipCount > 0)
         {
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
@@ -1124,7 +1127,17 @@ public class GameManager : MonoBehaviour
     {
         passCount++;
 
-        if (passCount >= remainingPlayers.Count - 1)
+        // ★修正: 場を流すのに必要なパス回数を計算
+        // 基本は「(参加人数 - 1)」だが、スキップされた人はパスできないのでその分減らす
+        // 例: 4人対戦で1人スキップされたら、残り2人がパスすれば流れる (4 - 1 - 1 = 2)
+        int requiredPasses = remainingPlayers.Count - 1 - lastSkippedCount;
+
+        // 念のため 0 以下にならないようにする (通常ありえないが安全策)
+        if (requiredPasses < 0) requiredPasses = 0;
+
+        Debug.Log($"Pass! passCount: {passCount}, required: {requiredPasses} (Skipped: {lastSkippedCount})");
+
+        if (passCount >= requiredPasses)
         {
             StartCoroutine(ClearTableAndRestart());
         }
@@ -1142,12 +1155,9 @@ public class GameManager : MonoBehaviour
 
         lastPlayedCards.Clear();
         passCount = 0;
+        lastSkippedCount = 0;
 
-        // ★修正: 場が流れた際に一時的な革命状態をリセット
         isTempRevolution = false;
-
-        // ★修正 (追加): 場が流れた際には、保留中のスキップやターン継続フラグもリセットして、
-        // 次のプレイヤーへのターン移動を確実に正規化します。
         pendingSkipCount = 0;
         skipTurnAdvance = false;
 
@@ -1157,10 +1167,11 @@ public class GameManager : MonoBehaviour
 
         if (remainingPlayers.Contains(lastPlayer))
         {
-            currentTurnIndex = lastPlayedPlayerIndex;
+            currentTurnIndex = lastPlayedPlayerIndex; // 最後にカードを出した人から
         }
         else
         {
+            // 最後にカードを出した人が既に上がっている場合、その次の人から
             int nextIdx = (lastPlayedPlayerIndex + 1) % players.Count;
             while (!remainingPlayers.Contains(players[nextIdx]))
             {
