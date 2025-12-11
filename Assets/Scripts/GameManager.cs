@@ -75,6 +75,8 @@ public class GameManager : MonoBehaviour
     // 革命中または11バック中なら、強さが逆になる
     private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
 
+
+
     public void SetForbidSpecialWin(bool value)
     {
         forbidSpecialWin = value;
@@ -107,6 +109,7 @@ public class GameManager : MonoBehaviour
     private bool isSevenPassMode = false;   // 7渡しモード中か
     private bool isTenDiscardMode = false;  // 10捨てモード中か
     private int pendingActionCardCount = 0; // 渡す/捨てる枚数
+
 
     // ================================================
     // --- ターン制管理メソッド ---
@@ -693,6 +696,7 @@ public class GameManager : MonoBehaviour
             if (selected.Count != required)
             {
                 EnqueueMessage($"{required}枚 選んでください");
+                ClearPassMessage();
                 return;
             }
 
@@ -709,6 +713,7 @@ public class GameManager : MonoBehaviour
             if (selected.Count != required)
             {
                 EnqueueMessage($"{required}枚 選んでください");
+                ClearPassMessage();
                 return;
             }
 
@@ -1077,29 +1082,39 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        // ★修正: 7渡し処理
         if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
-            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
+            // まず発動メッセージを表示
+            EnqueueMessage("7渡し発動!");
 
-            isSevenPassMode = true;
+            // メッセージを読ませるために少し待機 (モード切替前)
+            yield return new WaitForSeconds(1.5f);
+
+            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
+            isSevenPassMode = true; // ここでモードON
             pendingActionCardCount = state.SevenPassCount;
 
-            yield return new WaitForSeconds(1.0f);
+            // シーケンス開始
             StartCoroutine(HandleSevenPassSequence(currentPlayer));
-
             yield break;
         }
 
+        // ★修正: 10捨て処理
         if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
-            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
+            // まず発動メッセージを表示
+            EnqueueMessage("10捨て発動!");
 
-            isTenDiscardMode = true;
+            // メッセージを読ませるために少し待機
+            yield return new WaitForSeconds(1.5f);
+
+            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
+            isTenDiscardMode = true; // ここでモードON
             pendingActionCardCount = state.TenDiscardCount;
 
-            yield return new WaitForSeconds(1.0f);
+            // シーケンス開始
             StartCoroutine(HandleTenDiscardSequence(currentPlayer));
-
             yield break;
         }
 
@@ -1127,12 +1142,12 @@ public class GameManager : MonoBehaviour
     {
         passCount++;
 
-        // ★修正: 場を流すのに必要なパス回数を計算
-        // 基本は「(参加人数 - 1)」だが、スキップされた人はパスできないのでその分減らす
-        // 例: 4人対戦で1人スキップされたら、残り2人がパスすれば流れる (4 - 1 - 1 = 2)
+        // ★修正: 場を流す条件の計算
+        // 「まだあがっていない人数 - 1」から「スキップされた人数」を引く
+        // 例: 4人プレイで1人スキップされた場合、残り2人がパスすれば流れる (4 - 1 - 1 = 2回)
         int requiredPasses = remainingPlayers.Count - 1 - lastSkippedCount;
 
-        // 念のため 0 以下にならないようにする (通常ありえないが安全策)
+        // 安全策: マイナスにならないように補正
         if (requiredPasses < 0) requiredPasses = 0;
 
         Debug.Log($"Pass! passCount: {passCount}, required: {requiredPasses} (Skipped: {lastSkippedCount})");
@@ -1155,7 +1170,7 @@ public class GameManager : MonoBehaviour
 
         lastPlayedCards.Clear();
         passCount = 0;
-        lastSkippedCount = 0;
+        lastSkippedCount = 0; // ★追加: リセット
 
         isTempRevolution = false;
         pendingSkipCount = 0;
@@ -1425,14 +1440,42 @@ public class GameManager : MonoBehaviour
         return effectiveList;
     }
 
+    /// <summary>
+    /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします。
+    /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります。
+    /// </summary>
+    private void ClearPassMessage()
+    {
+        // メッセージのGameObjectを非アクティブにし、テキストをクリア
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+
+            // CanvasGroupがある場合は透明度もリセット
+            var cg = passMessageText.GetComponent<CanvasGroup>();
+            if (cg != null) cg.alpha = 0f;
+        }
+
+        // Playボタンのテキストを「プレイ」に戻す（操作完了時にリセット）
+        if (playButton != null)
+        {
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "プレイ";
+        }
+    }
+
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
-        string message = $"7渡し! {pendingActionCardCount}枚選んでください";
+        // ★修正: メッセージを具体的に
+        string message = $"渡すカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
 
         if (player is HumanPlayer)
         {
+            // ★常時表示用にテキストエリアを直接書き換え & 表示
             passMessageText.text = message;
             passMessageText.gameObject.SetActive(true);
+            var cg = passMessageText.GetComponent<CanvasGroup>();
+            if (cg != null) cg.alpha = 1f;
 
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
@@ -1448,7 +1491,8 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            EnqueueMessage(message);
+            // CPUの場合はエンキューで表示
+            EnqueueMessage($"CPUがカードを選んでいます...");
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
@@ -1461,12 +1505,16 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator HandleTenDiscardSequence(PlayerBase player)
     {
-        string message = $"10捨て! {pendingActionCardCount}枚選んで捨ててください";
+        // ★修正: メッセージを具体的に
+        string message = $"捨てるカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
 
         if (player is HumanPlayer)
         {
+            // ★常時表示
             passMessageText.text = message;
             passMessageText.gameObject.SetActive(true);
+            var cg = passMessageText.GetComponent<CanvasGroup>();
+            if (cg != null) cg.alpha = 1f;
 
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
@@ -1482,7 +1530,7 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            EnqueueMessage(message);
+            EnqueueMessage($"CPUが捨てるカードを選んでいます...");
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
