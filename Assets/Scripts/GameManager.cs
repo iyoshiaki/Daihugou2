@@ -323,7 +323,8 @@ public class GameManager : MonoBehaviour
             return IsBindSatisfied(single) ? single : new List<Card>();
         }
 
-        bool isFieldStair = IsStair(field);
+        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
+        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
         int fieldCount = field.Count;
         int fieldRank = field[0].Rank;
 
@@ -1441,7 +1442,9 @@ public class GameManager : MonoBehaviour
 
         int fieldStrength = GetCardStrength(fieldStrongestRank);
 
-        bool isFieldStair = IsStair(field);
+        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
+        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
+
 
         if (!isFieldStair)
         {
@@ -1467,10 +1470,13 @@ public class GameManager : MonoBehaviour
                 {
                     if (GetCardStrength(g.Key) > fieldStrength)
                     {
-                        var candidate = g.Take(fieldCount).ToList();
-                        if (IsBindSatisfied(candidate))
+                        var candidate = g.ToList();
+                        foreach (var playableCard in GetPlayableCardsFromGroup(candidate, fieldCount))
                         {
-                            playable.AddRange(candidate);
+                            if (!playable.Contains(playableCard))
+                            {
+                                playable.Add(playableCard);
+                            }
                         }
                     }
                 }
@@ -1496,6 +1502,39 @@ public class GameManager : MonoBehaviour
         }
 
         return playable;
+    }
+
+    private IEnumerable<Card> GetPlayableCardsFromGroup(List<Card> groupCards, int requiredCount)
+    {
+        var playableCards = new HashSet<Card>();
+        if (groupCards == null || groupCards.Count < requiredCount) return playableCards;
+
+        var combo = new List<Card>(requiredCount);
+
+        void BuildCombination(int startIndex)
+        {
+            if (combo.Count == requiredCount)
+            {
+                if (IsBindSatisfied(combo))
+                {
+                    foreach (var card in combo)
+                    {
+                        playableCards.Add(card);
+                    }
+                }
+                return;
+            }
+
+            for (int i = startIndex; i < groupCards.Count; i++)
+            {
+                combo.Add(groupCards[i]);
+                BuildCombination(i + 1);
+                combo.RemoveAt(combo.Count - 1);
+            }
+        }
+
+        BuildCombination(0);
+        return playableCards;
     }
 
     private List<Card> GetEffectivePlayedCards(List<Card> original)
