@@ -67,6 +67,10 @@ public class GameManager : MonoBehaviour
     private List<IRule> rules = new List<IRule>();
     private bool skipTurnAdvance = false;
 
+    private bool isFourStopWindowActive = false;
+    private int pendingEightCutCount = 0;
+
+
     // ★ 革命状態フラグ
     private bool isRevolution = false;
     // ★ 一時的な11バック状態フラグ
@@ -300,6 +304,12 @@ public class GameManager : MonoBehaviour
     private List<Card> GetPlayableCardsForCpu(CpuPlayer cpu, List<Card> field)
     {
         var hand = cpu.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
+
+        if (isFourStopWindowActive)
+        {
+            return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
+
 
         if (field == null || field.Count == 0)
         {
@@ -760,6 +770,11 @@ public class GameManager : MonoBehaviour
     {
         if (selected == null || selected.Count == 0) return false;
 
+        if (isFourStopWindowActive)
+        {
+            return IsFourStopCandidate(selected, GetRequiredFourStopCount());
+        }
+
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
 
         // --- 単体・役のチェック ---
@@ -1049,6 +1064,7 @@ public class GameManager : MonoBehaviour
 
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
+        bool fourStopTriggered = isFourStopWindowActive && IsFourStopCandidate(played, GetRequiredFourStopCount());
 
         foreach (var rule in rules)
         {
@@ -1057,6 +1073,12 @@ public class GameManager : MonoBehaviour
                 rule.Apply(effectivePlayedCards, state);
             }
         }
+
+        if (fourStopTriggered)
+        {
+            state.TriggerRevolution = false;
+        }
+
 
         if (state.TriggerRevolution)
         {
@@ -1081,23 +1103,43 @@ public class GameManager : MonoBehaviour
 
         bool eightCutTriggered = state.IsEightCut;
 
+        if (fourStopTriggered)
+        {
+            isFourStopWindowActive = false;
+            pendingEightCutCount = 0;
+            EnqueueMessage("4止め!");
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break;
+        }
+
         if (eightCutTriggered)
         {
             EnqueueMessage("8切り!");
 
-            yield return new WaitForSeconds(1.0f);
-            foreach (Transform child in tableArea) Destroy(child.gameObject);
-            lastPlayedCards.Clear();
-            passCount = 0;
-
-            pendingSkipCount = 0;
-            // 8切りでも一時的な革命状態をリセット
-            isTempRevolution = false;
-            ResetBindState();
-
-            if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
+            if (IsFourStopWindowEligible(effectivePlayedCards))
             {
-                skipTurnAdvance = true;
+                isFourStopWindowActive = true;
+                pendingEightCutCount = effectivePlayedCards.Count(c => c.Rank == 8);
+                pendingSkipCount = 0;
+                lastSkippedCount = 0;
+            }
+            else
+            {
+                yield return new WaitForSeconds(1.0f);
+                foreach (Transform child in tableArea) Destroy(child.gameObject);
+                lastPlayedCards.Clear();
+                passCount = 0;
+
+                pendingSkipCount = 0;
+                // 8切りでも一時的な革命状態をリセット
+                isTempRevolution = false;
+                ResetBindState();
+
+                if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
+                {
+                    skipTurnAdvance = true;
+                }
             }
         }
 
@@ -1159,6 +1201,13 @@ public class GameManager : MonoBehaviour
 
     private void HandlePass()
     {
+        if (isFourStopWindowActive)
+        {
+            isFourStopWindowActive = false;
+            pendingEightCutCount = 0;
+            StartCoroutine(ClearTableAndRestart());
+            return;
+        }
         passCount++;
 
         // ★修正: 場を流す条件の計算
@@ -1194,6 +1243,8 @@ public class GameManager : MonoBehaviour
         isTempRevolution = false;
         pendingSkipCount = 0;
         skipTurnAdvance = false;
+        isFourStopWindowActive = false;
+        pendingEightCutCount = 0;
         ResetBindState();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
@@ -1319,8 +1370,56 @@ public class GameManager : MonoBehaviour
         if (played == null || played.Count == 0) return false;
         return played.Any(c => c.Rank == 8);
     }
+    private bool IsFourStopWindowEligible(List<Card> effectivePlayed)
+    {
+        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
+        if (!effectivePlayed.All(c => c.Rank == 8)) return false;
+        return effectivePlayed.Count <= 2;
+    }
+
+    private int GetRequiredFourStopCount()
+    {
+        if (!isFourStopWindowActive) return 0;
+        return pendingEightCutCount switch
+        {
+            1 => 2,
+            2 => 4,
+            _ => 0
+        };
+    }
+
+    private bool IsFourStopCandidate(List<Card> selected, int requiredCount)
+    {
+        if (requiredCount <= 0 || selected == null) return false;
+        if (selected.Count != requiredCount) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        if (realSelected.Any(c => c.Rank != 4)) return false;
+
+        return realSelected.Count + jokerCount == requiredCount;
+    }
+
+    private List<Card> GetFourStopCards(List<Card> hand, int requiredCount)
+    {
+        if (requiredCount <= 0) return new List<Card>();
+        if (hand == null || hand.Count == 0) return new List<Card>();
+
+        var fours = hand.Where(c => !c.IsJoker() && c.Rank == 4).ToList();
+        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        var candidates = new List<Card>();
+        candidates.AddRange(fours);
+        if (joker != null) candidates.Add(joker);
+
+        if (candidates.Count < requiredCount) return new List<Card>();
+        return candidates.Take(requiredCount).ToList();
+    }
     private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
     {
+        if (isFourStopWindowActive)
+        {
+            return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
         if (field == null || field.Count == 0)
         {
             return new List<Card>(hand);
