@@ -51,6 +51,7 @@ public class GameManager : MonoBehaviour
     private List<PlayerBase> players;
 
     [SerializeField] private TextMeshProUGUI passMessageText;
+    [SerializeField] private TextMeshProUGUI SibariMessageText;
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
@@ -1509,6 +1510,8 @@ public class GameManager : MonoBehaviour
             isNumberBindActive = false;
             expectedNextRank = -1;
         }
+
+        UpdateSibariMessage();
     }
 
     private bool IsBindSatisfied(List<Card> selected)
@@ -1590,7 +1593,82 @@ public class GameManager : MonoBehaviour
         isSuitBindActive = false;
         expectedNextRank = -1;
         boundSuits.Clear();
+        ClearSibariMessage();
     }
+
+    private void UpdateSibariMessage()
+    {
+        if (SibariMessageText == null) return;
+
+        if (!isNumberBindActive && !isSuitBindActive)
+        {
+            ClearSibariMessage();
+            return;
+        }
+
+        string suitMessage = "";
+        if (isSuitBindActive && boundSuits.Count > 0)
+        {
+            suitMessage = string.Join("・", boundSuits.Select(GetSuitLabel));
+        }
+
+        string numberMessage = "";
+        if (isNumberBindActive && expectedNextRank > 0)
+        {
+            numberMessage = GetRankLabel(expectedNextRank);
+        }
+
+        if (isNumberBindActive && isSuitBindActive)
+        {
+            SibariMessageText.text = $"激縛り発動\n次は {numberMessage} & {suitMessage}";
+        }
+        else if (isNumberBindActive)
+        {
+            SibariMessageText.text = $"数縛り発動\n次は {numberMessage} のみ";
+        }
+        else
+        {
+            SibariMessageText.text = $"スート縛り発動\n{suitMessage} のみ";
+        }
+
+        SibariMessageText.gameObject.SetActive(true);
+        var cg = SibariMessageText.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = 1f;
+    }
+
+    private void ClearSibariMessage()
+    {
+        if (SibariMessageText == null) return;
+        var cg = SibariMessageText.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = 0f;
+        SibariMessageText.gameObject.SetActive(false);
+        SibariMessageText.text = "";
+    }
+
+    private string GetSuitLabel(Suit suit)
+    {
+        return suit switch
+        {
+            Suit.Spade => "♠",
+            Suit.Heart => "♥",
+            Suit.Diamond => "♦",
+            Suit.Club => "♣",
+            _ => suit.ToString()
+        };
+    }
+
+    private string GetRankLabel(int rank)
+    {
+        return rank switch
+        {
+            14 => "A",
+            15 => "2",
+            16 => "Joker",
+            _ => rank.ToString()
+        };
+    }
+
+
     /// <summary>
     /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします。
     /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります。
