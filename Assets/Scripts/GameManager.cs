@@ -1493,6 +1493,7 @@ public class GameManager : MonoBehaviour
         {
             isNumberBindActive = false;
             expectedNextRank = -1;
+            UpdateSibariMessage();
             return;
         }
 
@@ -1596,9 +1597,30 @@ public class GameManager : MonoBehaviour
         ClearSibariMessage();
     }
 
+    private void ShowMessageText(TextMeshProUGUI target, string message)
+    {
+        if (target == null) return;
+        target.text = message;
+        target.gameObject.SetActive(true);
+        var cg = target.GetComponent<CanvasGroup>();
+        if (cg == null) cg = target.gameObject.AddComponent<CanvasGroup>();
+        cg.alpha = 1f;
+    }
+
+    private void HideMessageText(TextMeshProUGUI target)
+    {
+        if (target == null) return;
+        var cg = target.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = 0f;
+        target.gameObject.SetActive(false);
+        target.text = "";
+    }
+
+
     private void UpdateSibariMessage()
     {
-        if (SibariMessageText == null) return;
+        var targetText = passMessageText != null ? passMessageText : SibariMessageText;
+        if (targetText == null) return;
 
         if (!isNumberBindActive && !isSuitBindActive)
         {
@@ -1620,29 +1642,26 @@ public class GameManager : MonoBehaviour
 
         if (isNumberBindActive && isSuitBindActive)
         {
-            SibariMessageText.text = $"激縛り発動\n次は {numberMessage} & {suitMessage}";
+            targetText.text = $"激縛り発動次は {numberMessage} & {suitMessage}";
         }
         else if (isNumberBindActive)
         {
-            SibariMessageText.text = $"数縛り発動\n次は {numberMessage} のみ";
+            targetText.text = $"数縛り発動次は {numberMessage} のみ";
         }
         else
         {
-            SibariMessageText.text = $"スート縛り発動\n{suitMessage} のみ";
+            targetText.text = $"スート縛り発動{suitMessage} のみ";
         }
 
-        SibariMessageText.gameObject.SetActive(true);
-        var cg = SibariMessageText.GetComponent<CanvasGroup>();
+        targetText.gameObject.SetActive(true);
+        var cg = targetText.GetComponent<CanvasGroup>();
         if (cg != null) cg.alpha = 1f;
     }
 
     private void ClearSibariMessage()
     {
-        if (SibariMessageText == null) return;
-        var cg = SibariMessageText.GetComponent<CanvasGroup>();
-        if (cg != null) cg.alpha = 0f;
-        SibariMessageText.gameObject.SetActive(false);
-        SibariMessageText.text = "";
+        var targetText = passMessageText != null ? passMessageText : SibariMessageText;
+        HideMessageText(targetText);
     }
 
     private string GetSuitLabel(Suit suit)
@@ -1676,15 +1695,7 @@ public class GameManager : MonoBehaviour
     private void ClearPassMessage()
     {
         // メッセージのGameObjectを非アクティブにし、テキストをクリア
-        if (passMessageText != null)
-        {
-            passMessageText.gameObject.SetActive(false);
-            passMessageText.text = "";
-
-            // CanvasGroupがある場合は透明度もリセット
-            var cg = passMessageText.GetComponent<CanvasGroup>();
-            if (cg != null) cg.alpha = 0f;
-        }
+        HideMessageText(passMessageText);
 
         // Playボタンのテキストを「プレイ」に戻す（操作完了時にリセット）
         if (playButton != null)
@@ -1701,10 +1712,7 @@ public class GameManager : MonoBehaviour
         if (player is HumanPlayer)
         {
             // ★常時表示用にテキストエリアを直接書き換え & 表示
-            passMessageText.text = message;
-            passMessageText.gameObject.SetActive(true);
-            var cg = passMessageText.GetComponent<CanvasGroup>();
-            if (cg != null) cg.alpha = 1f;
+            ShowMessageText(passMessageText, message);
 
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
@@ -1740,10 +1748,7 @@ public class GameManager : MonoBehaviour
         if (player is HumanPlayer)
         {
             // ★常時表示
-            passMessageText.text = message;
-            passMessageText.gameObject.SetActive(true);
-            var cg = passMessageText.GetComponent<CanvasGroup>();
-            if (cg != null) cg.alpha = 1f;
+            ShowMessageText(passMessageText, message);
 
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
