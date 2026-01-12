@@ -1543,8 +1543,27 @@ public class GameManager : MonoBehaviour
 
     public IEnumerator ExecuteSevenPassTransfer(PlayerBase fromPlayer, List<Card> cards)
     {
+        // --- 修正箇所 開始 ---
+        // 単純な +1 ではなく、remainingPlayers に含まれているプレイヤーが見つかるまで探す
         int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
         PlayerBase toPlayer = players[nextIndex];
+
+        int safetyLoop = 0;
+        // ターゲットが「あがった人（remainingPlayersに含まれない人）」である間、次へ進める
+        while (!remainingPlayers.Contains(toPlayer))
+        {
+            nextIndex = (nextIndex + 1) % players.Count;
+            toPlayer = players[nextIndex];
+
+            // 無限ループ防止（念のため）
+            safetyLoop++;
+            if (safetyLoop > players.Count)
+            {
+                Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
+                break;
+            }
+        }
+        // --- 修正箇所 終了 ---
 
         Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
 
