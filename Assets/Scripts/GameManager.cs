@@ -75,6 +75,12 @@ public class GameManager : MonoBehaviour
     // 革命中または11バック中なら、強さが逆になる
     private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
 
+    // --- 縛り状態 ---
+    private bool isNumberBindActive = false;
+    private bool isSuitBindActive = false;
+    private int expectedNextRank = -1;
+    private HashSet<Suit> boundSuits = new();
+
 
 
     public void SetForbidSpecialWin(bool value)
@@ -300,9 +306,10 @@ public class GameManager : MonoBehaviour
             if (stairs.Count > 0)
             {
                 var chosen = stairs[Random.Range(0, stairs.Count)];
-                return chosen;
+                return IsBindSatisfied(chosen) ? chosen : new List<Card>();
             }
-            return new List<Card> { hand.First() };
+            var single = new List<Card> { hand.First() };
+            return IsBindSatisfied(single) ? single : new List<Card>();
         }
 
         bool isFieldStair = IsStair(field);
@@ -318,7 +325,8 @@ public class GameManager : MonoBehaviour
                 var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
                 if (spade3 != null)
                 {
-                    return new List<Card> { spade3 };
+                    var candidate = new List<Card> { spade3 };
+                    return IsBindSatisfied(candidate) ? candidate : new List<Card>();
                 }
                 // スペード3がなければ、ジョーカーには勝てないのでパス(空リスト返却)
                 return new List<Card>();
@@ -339,7 +347,8 @@ public class GameManager : MonoBehaviour
                 .OrderBy(g => GetCardStrength(g.Key)) // 弱い順に出す
                 .FirstOrDefault();
 
-            return candidates?.Take(fieldCount).ToList() ?? new List<Card>();
+            var candidateList = candidates?.Take(fieldCount).ToList() ?? new List<Card>();
+            return candidateList.Count > 0 && IsBindSatisfied(candidateList) ? candidateList : new List<Card>();
         }
         else
         {
@@ -775,6 +784,7 @@ public class GameManager : MonoBehaviour
         // --- 場に出ているカードとの比較 ---
         if (field != null && field.Count > 0)
         {
+            bool isSpade3Counter = false;
             // ★追加: スペードの3はジョーカー単体出しに勝てるルール
             // 場がジョーカー1枚の場合のみ
             if (field.Count == 1 && field[0].IsJoker())
@@ -782,7 +792,7 @@ public class GameManager : MonoBehaviour
                 // 自分が出すのが「スペード」かつ「Rank3」かつ「1枚」ならOK
                 if (selected.Count == 1 && selected[0].Suit == Suit.Spade && selected[0].Rank == 3)
                 {
-                    return true;
+                    isSpade3Counter = true;
                 }
             }
 
@@ -829,7 +839,12 @@ public class GameManager : MonoBehaviour
             int selectedStrength = GetCardStrength(selectedStrongestRank);
 
             // 同じ強さ以下なら出せない
-            if (selectedStrength <= fieldStrength) return false;
+            if (!isSpade3Counter && selectedStrength <= fieldStrength) return false;
+        }
+
+        if (field != null && field.Count > 0 && !IsBindSatisfied(selected))
+        {
+            return false;
         }
 
         return true;
@@ -1054,6 +1069,8 @@ public class GameManager : MonoBehaviour
             isTempRevolution = true;
         }
 
+        UpdateBindState(fieldBeforePlay, effectivePlayedCards);
+
         pendingSkipCount = state.SkipCount;
         lastSkippedCount = state.SkipCount;
         if (pendingSkipCount > 0)
@@ -1075,6 +1092,7 @@ public class GameManager : MonoBehaviour
             pendingSkipCount = 0;
             // 8切りでも一時的な革命状態をリセット
             isTempRevolution = false;
+            ResetBindState();
 
             if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
             {
@@ -1175,6 +1193,7 @@ public class GameManager : MonoBehaviour
         isTempRevolution = false;
         pendingSkipCount = 0;
         skipTurnAdvance = false;
+        ResetBindState();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
@@ -1331,7 +1350,10 @@ public class GameManager : MonoBehaviour
             if (field.Count == 1 && field[0].IsJoker())
             {
                 var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
-                if (spade3 != null) playable.Add(spade3);
+                if (spade3 != null && IsBindSatisfied(new List<Card> { spade3 }))
+                {
+                    playable.Add(spade3);
+                }
             }
 
             var groups = hand.GroupBy(c => c.Rank);
@@ -1345,7 +1367,11 @@ public class GameManager : MonoBehaviour
                 {
                     if (GetCardStrength(g.Key) > fieldStrength)
                     {
-                        playable.AddRange(g);
+                        var candidate = g.Take(fieldCount).ToList();
+                        if (IsBindSatisfied(candidate))
+                        {
+                            playable.AddRange(candidate);
+                        }
                     }
                 }
             }
@@ -1361,7 +1387,10 @@ public class GameManager : MonoBehaviour
                 int seqStrongestRank = seq.Max(c => c.Rank);
                 if (GetCardStrength(seqStrongestRank) > fieldStrength)
                 {
-                    playable.AddRange(seq);
+                    if (IsBindSatisfied(seq))
+                    {
+                        playable.AddRange(seq);
+                    }
                 }
             }
         }
@@ -1440,6 +1469,128 @@ public class GameManager : MonoBehaviour
         return effectiveList;
     }
 
+    private void UpdateBindState(List<Card> previousField, List<Card> currentPlayed)
+    {
+        if (previousField == null || previousField.Count == 0) return;
+
+        var (prevReal, prevJokers) = GetRealCardsAndJokers(previousField);
+        var (currReal, currJokers) = GetRealCardsAndJokers(currentPlayed);
+
+        bool prevIsStair = IsStairWithJoker(prevReal, prevJokers);
+        bool currIsStair = IsStairWithJoker(currReal, currJokers);
+
+        var prevSuitSet = GetBindSuitSet(previousField, prevIsStair);
+        var currSuitSet = GetBindSuitSet(currentPlayed, currIsStair);
+
+        var intersection = new HashSet<Suit>(prevSuitSet);
+        intersection.IntersectWith(currSuitSet);
+
+        isSuitBindActive = intersection.Count > 0;
+        boundSuits = intersection;
+
+        if (prevIsStair || currIsStair)
+        {
+            isNumberBindActive = false;
+            expectedNextRank = -1;
+            return;
+        }
+
+        int prevRank = GetBindRank(previousField, prevIsStair);
+        int currRank = GetBindRank(currentPlayed, currIsStair);
+
+        int expectedRankFromPrev = GetNextSequentialRank(prevRank);
+        if (prevRank > 0 && currRank == expectedRankFromPrev)
+        {
+            isNumberBindActive = true;
+            expectedNextRank = GetNextSequentialRank(currRank);
+        }
+        else
+        {
+            isNumberBindActive = false;
+            expectedNextRank = -1;
+        }
+    }
+
+    private bool IsBindSatisfied(List<Card> selected)
+    {
+        if (!isNumberBindActive && !isSuitBindActive) return true;
+        if (selected == null || selected.Count == 0) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+        bool isStair = IsStairWithJoker(realSelected, jokerCount);
+
+        if (isNumberBindActive)
+        {
+            if (isStair) return false;
+            int selectedRank = GetBindRank(selected, isStair);
+            if (selectedRank <= 0 || expectedNextRank <= 0) return false;
+            if (selectedRank != expectedNextRank) return false;
+        }
+
+        if (isSuitBindActive)
+        {
+            var suitSet = GetBindSuitSet(selected, isStair);
+            if (suitSet.Count == 0) return false;
+            if (!suitSet.All(s => boundSuits.Contains(s))) return false;
+        }
+
+        return true;
+    }
+
+    private int GetBindRank(List<Card> cards, bool isStair)
+    {
+        var realCards = cards.Where(c => !c.IsJoker()).ToList();
+        if (realCards.Count == 0) return -1;
+
+        if (isStair)
+        {
+            var effective = GetEffectivePlayedCards(cards);
+            return effective.Max(c => c.Rank);
+        }
+
+        return realCards[0].Rank;
+    }
+
+    private HashSet<Suit> GetBindSuitSet(List<Card> cards, bool isStair)
+    {
+        var suits = new HashSet<Suit>();
+
+        if (isStair)
+        {
+            var real = cards.FirstOrDefault(c => !c.IsJoker());
+            if (real != null) suits.Add(real.Suit);
+            return suits;
+        }
+
+        foreach (var card in cards)
+        {
+            if (!card.IsJoker())
+            {
+                suits.Add(card.Suit);
+            }
+        }
+        return suits;
+    }
+
+    private int GetNextSequentialRank(int rank)
+    {
+        if (rank <= 0) return -1;
+
+        if (IsRevolutionActive)
+        {
+            return rank > 3 ? rank - 1 : -1;
+        }
+
+        return rank < 15 ? rank + 1 : -1;
+    }
+
+    private void ResetBindState()
+    {
+        isNumberBindActive = false;
+        isSuitBindActive = false;
+        expectedNextRank = -1;
+        boundSuits.Clear();
+    }
     /// <summary>
     /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします。
     /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります。
@@ -1722,6 +1873,7 @@ public class GameManager : MonoBehaviour
         gameRanks.Clear();
         passCount = 0;
         lastPlayedCards.Clear();
+        ResetBindState();
 
         foreach (Transform child in tableArea) Destroy(child.gameObject);
 
