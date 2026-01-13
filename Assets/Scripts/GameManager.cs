@@ -75,6 +75,7 @@ public class GameManager : MonoBehaviour
     private bool isRevolution = false;
     // ★ 一時的な11バック状態フラグ
     private bool isTempRevolution = false;
+    private bool isElevenSilenceNextField = false;
 
     // 現在の「強さ」計算プロパティ
     // 革命中または11バック中なら、強さが逆になる
@@ -455,6 +456,7 @@ public class GameManager : MonoBehaviour
         remainingPlayers = new List<PlayerBase>(players);
         currentGameCount = 1;
 
+        rules.Add(new ElevenSilenceRule());
         rules.Add(new EightCutRule());
         rules.Add(new RevolutionRule());
         rules.Add(new ElevenBackRule());
@@ -1101,19 +1103,43 @@ public class GameManager : MonoBehaviour
 
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
-        bool fourStopTriggered = isFourStopWindowActive && IsFourStopCandidate(played, GetRequiredFourStopCount());
 
-        foreach (var rule in rules)
+        bool isSilenceCarryover = isElevenSilenceNextField;
+
+        if (isSilenceCarryover)
         {
-            if (rule.CanApply(effectivePlayedCards, state))
+            isElevenSilenceNextField = false;
+            state.IsElevenSilence = true;
+        }
+        else
+        {
+            foreach (var rule in rules)
             {
-                rule.Apply(effectivePlayedCards, state);
+                if (rule.CanApply(effectivePlayedCards, state))
+                {
+                    rule.Apply(effectivePlayedCards, state);
+                    if (state.IsElevenSilence) break;
+                }
             }
         }
 
-        if (fourStopTriggered)
+        bool fourStopTriggered = false;
+        if (!state.IsElevenSilence)
         {
-            state.TriggerRevolution = false;
+            fourStopTriggered = isFourStopWindowActive && IsFourStopCandidate(played, GetRequiredFourStopCount());
+            if (fourStopTriggered)
+            {
+                state.TriggerRevolution = false;
+            }
+        }
+
+        if (state.IsElevenSilence)
+        {
+            EnqueueMessage(isSilenceCarryover ? "11サイレンス中!" : "11サイレンス!");
+            if (!isSilenceCarryover)
+            {
+                isElevenSilenceNextField = true;
+            }
         }
 
 

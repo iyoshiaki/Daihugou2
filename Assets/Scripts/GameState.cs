@@ -16,6 +16,8 @@ public class GameState
     public bool IsEightCut { get; set; } = false;
     public int SevenPassCount { get; set; } = 0; // 0‚È‚ç”­“®‚È‚µ
     public int TenDiscardCount { get; set; } = 0; // 0‚È‚ç”­“®‚È‚µ
+    public bool IsElevenSilence { get; set; } = false;
+
 
     public GameState(List<Card> tableCards, int currentPlayerIndex)
     {
