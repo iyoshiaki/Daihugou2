@@ -121,7 +121,20 @@ public class GameManager : MonoBehaviour
 
     private bool isSevenPassMode = false;   // 7渡しモード中か
     private bool isTenDiscardMode = false;  // 10捨てモード中か
+
+    private bool isSixTradeMode = false;    // 6トレードモード中か
+    private bool isSelectingTradeTarget = false;
+    private bool isSelectingTradeCards = false;
+    private bool isSelectingTradeSourceCards = false;
+
     private int pendingActionCardCount = 0; // 渡す/捨てる枚数
+
+    private int pendingTradeCardCount = 0;  // 6トレードの枚数
+    private PlayerBase tradeSourcePlayer;
+    private PlayerBase tradeTargetPlayer;
+    private List<PlayerBase> tradeTargetCandidates = new();
+    private int tradeTargetIndex = 0;
+    private List<Card> pendingTradeSourceCards = new();
 
 
     // ================================================
@@ -276,7 +289,7 @@ public class GameManager : MonoBehaviour
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
 
         // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
-        if (isSevenPassMode || isTenDiscardMode)
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
         {
             yield break;
         }
@@ -462,6 +475,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new RevolutionRule());
         rules.Add(new ElevenBackRule());
         rules.Add(new FiveSkipRule());
+        rules.Add(new SixTradeRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
         rules.Add(new GreatChaosRule());
@@ -477,7 +491,7 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
-        if (!isPlayerTurn)
+        if (!isPlayerTurn && !IsTradeSelectionActive())
         {
             if (playButton != null) playButton.gameObject.SetActive(false);
             if (passButton != null) passButton.gameObject.SetActive(false);
@@ -488,14 +502,28 @@ public class GameManager : MonoBehaviour
         {
             playButton.gameObject.SetActive(true);
 
-            if (isSevenPassMode || isTenDiscardMode)
+            if (isSelectingTradeTarget)
+            {
+                playButton.interactable = true;
+                if (passButton != null)
+                {
+                    passButton.gameObject.SetActive(true);
+                    passButton.interactable = true;
+                }
+                return;
+            }
+
+            if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
             {
                 if (playButton != null)
                 {
                     playButton.gameObject.SetActive(true);
 
                     int selectedCount = human.SelectCards(human.Hand).Count;
-                    int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+
+                    int required = isSelectingTradeCards
+                        ? Mathf.Min(pendingTradeCardCount, human.Hand.Count)
+                        : Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
                     playButton.interactable = (selectedCount == required);
                 }
@@ -545,6 +573,11 @@ public class GameManager : MonoBehaviour
             }
         }
         return false;
+    }
+
+    private bool IsTradeSelectionActive()
+    {
+        return isSelectingTradeTarget || isSelectingTradeCards;
     }
 
     private void CreatePlayerCardSlots(int slotCount)
@@ -636,7 +669,7 @@ public class GameManager : MonoBehaviour
 
         List<Card> playableCards;
 
-        if (isSevenPassMode || isTenDiscardMode)
+        if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
         {
             playableCards = new List<Card>(player.Hand);
         }
@@ -735,7 +768,7 @@ public class GameManager : MonoBehaviour
 
         // 7渡しや10捨てが開始された場合、DisplayPlayedCardsOnTableの中で処理が分岐するため、
         // ここには到達しないはずだが、念のためガード。
-        if (isSevenPassMode || isTenDiscardMode)
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
         {
             yield break;
         }
@@ -756,6 +789,17 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
+        if (isSelectingTradeTarget)
+        {
+            ConfirmTradeTargetSelection();
+            return;
+        }
+
+        if (isSelectingTradeCards)
+        {
+            HandleTradeCardSelection();
+            return;
+        }
         if (!isPlayerTurn) return;
 
         if (isSevenPassMode)
@@ -1006,6 +1050,11 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
+        if (isSelectingTradeTarget)
+        {
+            CycleTradeTargetSelection();
+            return;
+        }
         if (players[currentTurnIndex] != humanPlayer) return;
         HandlePass();
     }
@@ -1266,6 +1315,19 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        if (state.SixTradeCount > 0 && remainingPlayers.Contains(currentPlayer))
+        {
+            EnqueueMessage("6トレード発動!");
+            yield return new WaitForSeconds(1.5f);
+
+            Debug.Log($"6トレードシーケンス開始: {state.SixTradeCount}枚");
+            isSixTradeMode = true;
+            pendingTradeCardCount = state.SixTradeCount;
+
+            StartCoroutine(HandleSixTradeSequence(currentPlayer));
+            yield break;
+        }
+
         // ★修正: 7渡し処理
         if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
@@ -1452,7 +1514,7 @@ public class GameManager : MonoBehaviour
 
         while (messageQueue.Count > 0)
         {
-            if (isSevenPassMode || isTenDiscardMode)
+            if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
             {
                 yield return null;
                 continue;
@@ -1972,6 +2034,269 @@ public class GameManager : MonoBehaviour
         {
             playButton.GetComponentInChildren<TextMeshProUGUI>().text = "プレイ";
         }
+    }
+
+    private IEnumerator HandleSixTradeSequence(PlayerBase player)
+    {
+        tradeSourcePlayer = player;
+        tradeTargetPlayer = null;
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count);
+
+        if (tradeSourcePlayer is HumanPlayer)
+        {
+            BeginTradeTargetSelection(tradeSourcePlayer);
+            yield break;
+        }
+
+        tradeTargetPlayer = ChooseTradeTargetForCpu(tradeSourcePlayer);
+        if (tradeTargetPlayer == null)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
+        if (pendingTradeCardCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        var sourceCards = SelectTradeCardsForCpu(tradeSourcePlayer, pendingTradeCardCount);
+        if (tradeTargetPlayer is HumanPlayer)
+        {
+            pendingTradeSourceCards = sourceCards;
+            BeginTradeCardSelection(tradeSourcePlayer, tradeTargetPlayer, false);
+            yield break;
+        }
+
+        var targetCards = SelectTradeCardsForCpu(tradeTargetPlayer, pendingTradeCardCount);
+        yield return StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, sourceCards, targetCards));
+    }
+
+    private void BeginTradeTargetSelection(PlayerBase sourcePlayer)
+    {
+        tradeTargetCandidates = GetTradeTargetCandidates(sourcePlayer);
+        if (tradeTargetCandidates.Count == 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            return;
+        }
+
+        tradeTargetIndex = 0;
+        isSelectingTradeTarget = true;
+
+        UpdateTradeTargetMessage();
+
+        if (playButton != null)
+        {
+            playButton.interactable = true;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "決定";
+        }
+        if (passButton != null)
+        {
+            passButton.gameObject.SetActive(true);
+            passButton.interactable = true;
+        }
+    }
+
+    private void CycleTradeTargetSelection()
+    {
+        if (!isSelectingTradeTarget || tradeTargetCandidates.Count == 0) return;
+
+        tradeTargetIndex = (tradeTargetIndex + 1) % tradeTargetCandidates.Count;
+        UpdateTradeTargetMessage();
+    }
+
+    private void ConfirmTradeTargetSelection()
+    {
+        if (!isSelectingTradeTarget || tradeTargetCandidates.Count == 0) return;
+
+        tradeTargetPlayer = tradeTargetCandidates[tradeTargetIndex];
+        isSelectingTradeTarget = false;
+
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
+        if (pendingTradeCardCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            return;
+        }
+
+        BeginTradeCardSelection(tradeSourcePlayer, tradeTargetPlayer, true);
+    }
+
+    private void BeginTradeCardSelection(PlayerBase sourcePlayer, PlayerBase targetPlayer, bool selectingSourceCards)
+    {
+        tradeSourcePlayer = sourcePlayer;
+        tradeTargetPlayer = targetPlayer;
+        isSelectingTradeCards = true;
+        isSelectingTradeSourceCards = selectingSourceCards;
+
+        string message = selectingSourceCards
+            ? $"トレードに出すカードを\n<size=120%>{pendingTradeCardCount}枚</size>\n選んでください"
+            : $"トレードで渡すカードを\n<size=120%>{pendingTradeCardCount}枚</size>\n選んでください";
+
+        ShowMessageText(passMessageText, message);
+
+        ResetPlayerSelection();
+        CreatePlayerCardSlots(human.Hand.Count);
+        PopulatePlayerHand(human);
+
+        if (passButton != null) passButton.interactable = false;
+        if (playButton != null)
+        {
+            playButton.interactable = false;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "トレード";
+        }
+    }
+
+    private void HandleTradeCardSelection()
+    {
+        var selected = human.SelectCards(human.Hand);
+        int required = Mathf.Min(pendingTradeCardCount, human.Hand.Count);
+
+        if (selected.Count != required)
+        {
+            ShowMessageText(passMessageText, $"{required}枚 選んでください");
+            return;
+        }
+
+        if (playButton != null) playButton.interactable = false;
+
+        if (isSelectingTradeSourceCards)
+        {
+            pendingTradeSourceCards = selected;
+            var targetCards = SelectTradeCardsForCpu(tradeTargetPlayer, pendingTradeCardCount);
+            StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, pendingTradeSourceCards, targetCards));
+        }
+        else
+        {
+            var targetCards = selected;
+            StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, pendingTradeSourceCards, targetCards));
+        }
+    }
+
+    private IEnumerator ExecuteSixTrade(PlayerBase sourcePlayer, PlayerBase targetPlayer, List<Card> sourceCards, List<Card> targetCards)
+    {
+        int tradeCount = Mathf.Min(sourceCards.Count, targetCards.Count);
+        if (tradeCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        Debug.Log($"{sourcePlayer.Name} と {targetPlayer.Name} が {tradeCount}枚 トレード");
+
+        foreach (var card in sourceCards.Take(tradeCount))
+        {
+            sourcePlayer.Hand.Remove(card);
+            targetPlayer.Hand.Add(card);
+
+            if (sourcePlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        foreach (var card in targetCards.Take(tradeCount))
+        {
+            targetPlayer.Hand.Remove(card);
+            sourcePlayer.Hand.Add(card);
+
+            if (targetPlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        if (sourcePlayer is HumanPlayer || targetPlayer is HumanPlayer)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+
+        if (sourcePlayer is not HumanPlayer)
+        {
+            Transform cpuArea = sourcePlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, sourcePlayer.Hand.Count);
+        }
+
+        if (targetPlayer is not HumanPlayer)
+        {
+            Transform cpuArea = targetPlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, targetPlayer.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        EndSixTradeMode();
+        EndTurn();
+    }
+
+    private void EndSixTradeMode()
+    {
+        isSixTradeMode = false;
+        isSelectingTradeTarget = false;
+        isSelectingTradeCards = false;
+        isSelectingTradeSourceCards = false;
+        pendingTradeCardCount = 0;
+        tradeTargetCandidates.Clear();
+        pendingTradeSourceCards.Clear();
+        tradeSourcePlayer = null;
+        tradeTargetPlayer = null;
+
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+
+        ResetPlayButtonUI();
+    }
+
+    private void UpdateTradeTargetMessage()
+    {
+        if (tradeTargetCandidates.Count == 0) return;
+        var target = tradeTargetCandidates[tradeTargetIndex];
+        string message = $"トレード相手: <size=120%>{target.Name}</size>\nパスで切替 / 出すで決定";
+        ShowMessageText(passMessageText, message);
+    }
+
+    private List<PlayerBase> GetTradeTargetCandidates(PlayerBase sourcePlayer)
+    {
+        return players.Where(p => p != sourcePlayer && remainingPlayers.Contains(p)).ToList();
+    }
+
+    private PlayerBase ChooseTradeTargetForCpu(PlayerBase sourcePlayer)
+    {
+        if (remainingPlayers.Contains(human) && sourcePlayer != human)
+        {
+            return human;
+        }
+
+        int startIndex = (players.IndexOf(sourcePlayer) + 1) % players.Count;
+        for (int i = 0; i < players.Count; i++)
+        {
+            int index = (startIndex + i) % players.Count;
+            var candidate = players[index];
+            if (candidate != sourcePlayer && remainingPlayers.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private List<Card> SelectTradeCardsForCpu(PlayerBase player, int count)
+    {
+        int tradeCount = Mathf.Min(count, player.Hand.Count);
+        return player.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).Take(tradeCount).ToList();
     }
 
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
