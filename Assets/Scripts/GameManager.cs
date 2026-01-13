@@ -461,6 +461,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new FiveSkipRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
+        rules.Add(new GreatChaosRule());
     }
     void Update()
     {
@@ -678,6 +679,41 @@ public class GameManager : MonoBehaviour
             }
             LayoutRebuilder.ForceRebuildLayoutImmediate(cpuArea.GetComponent<RectTransform>());
         }
+    }
+
+
+
+    private void ApplyGreatChaos()
+    {
+        var activePlayers = remainingPlayers.Where(player => player.Hand.Count > 0).ToList();
+        if (activePlayers.Count <= 1)
+        {
+            return;
+        }
+
+        var hands = activePlayers.Select(player => new List<Card>(player.Hand)).ToList();
+
+        for (int i = 0; i < hands.Count; i++)
+        {
+            int rand = Random.Range(i, hands.Count);
+            (hands[i], hands[rand]) = (hands[rand], hands[i]);
+        }
+
+        for (int i = 0; i < activePlayers.Count; i++)
+        {
+            activePlayers[i].Hand = hands[i];
+            activePlayers[i].SelectedCards.Clear();
+        }
+
+        if (human != null)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+
+        if (cpuPlayers.Count > 0) PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
+        if (cpuPlayers.Count > 1) PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
+        if (cpuPlayers.Count > 2) PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
     }
 
     private IEnumerator PlayerPlayRoutine(List<Card> played)
@@ -1094,6 +1130,13 @@ public class GameManager : MonoBehaviour
         }
 
         UpdateBindState(fieldBeforePlay, effectivePlayedCards);
+
+        if (state.TriggerGreatChaos)
+        {
+            EnqueueMessage("大混乱! 手札がランダムに入れ替わります。");
+            yield return new WaitForSeconds(1.0f);
+            ApplyGreatChaos();
+        }
 
         pendingSkipCount = state.SkipCount;
         lastSkippedCount = state.SkipCount;
