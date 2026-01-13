@@ -76,6 +76,7 @@ public class GameManager : MonoBehaviour
     // ★ 一時的な11バック状態フラグ
     private bool isTempRevolution = false;
     private bool isElevenSilenceNextField = false;
+    private bool isNineForceActive = false;
 
     // 現在の「強さ」計算プロパティ
     // 革命中または11バック中なら、強さが逆になる
@@ -464,6 +465,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
         rules.Add(new GreatChaosRule());
+        rules.Add(new NineForceRule());
     }
     void Update()
     {
@@ -519,6 +521,15 @@ public class GameManager : MonoBehaviour
             {
                 bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
                 passButton.gameObject.SetActive(!isFieldEmpty);
+                if (!isFieldEmpty)
+                {
+                    bool canPass = true;
+                    if (isNineForceActive)
+                    {
+                        canPass = !HasValidPlayForNineForce(human.Hand, lastPlayedCards);
+                    }
+                    passButton.interactable = canPass;
+                }
             }
         }
     }
@@ -905,6 +916,42 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
+    private bool HasValidPlayForNineForce(List<Card> hand, List<Card> field)
+    {
+        if (hand == null || hand.Count == 0) return false;
+        if (field == null || field.Count == 0) return false;
+
+        int requiredCount = isFourStopWindowActive ? GetRequiredFourStopCount() : field.Count;
+        if (requiredCount <= 0 || hand.Count < requiredCount) return false;
+
+        var combo = new List<Card>(requiredCount);
+        bool found = false;
+
+        void Search(int startIndex)
+        {
+            if (found) return;
+            if (combo.Count == requiredCount)
+            {
+                if (IsValidPlay(hand, combo, field))
+                {
+                    found = true;
+                }
+                return;
+            }
+
+            for (int i = startIndex; i <= hand.Count - (requiredCount - combo.Count); i++)
+            {
+                combo.Add(hand[i]);
+                Search(i + 1);
+                combo.RemoveAt(combo.Count - 1);
+                if (found) return;
+            }
+        }
+
+        Search(0);
+        return found;
+    }
+
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
         int totalCards = realCards.Count + jokerCount;
@@ -1142,6 +1189,11 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        if (state.TriggerNineForce)
+        {
+            isNineForceActive = true;
+            EnqueueMessage("9フォース発動!");
+        }
 
         if (state.TriggerRevolution)
         {
@@ -1204,6 +1256,7 @@ public class GameManager : MonoBehaviour
                 pendingSkipCount = 0;
                 // 8切りでも一時的な革命状態をリセット
                 isTempRevolution = false;
+                isNineForceActive = false;
                 ResetBindState();
 
                 if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
@@ -1271,6 +1324,15 @@ public class GameManager : MonoBehaviour
 
     private void HandlePass()
     {
+        if (isNineForceActive && lastPlayedCards != null && lastPlayedCards.Count > 0)
+        {
+            var currentPlayer = players[currentTurnIndex];
+            if (HasValidPlayForNineForce(currentPlayer.Hand, lastPlayedCards))
+            {
+                EnqueueMessage("9フォース中は出せるカードがある限りパスできません。");
+                return;
+            }
+        }
         if (isFourStopWindowActive)
         {
             isFourStopWindowActive = false;
@@ -1311,6 +1373,7 @@ public class GameManager : MonoBehaviour
         lastSkippedCount = 0; // ★追加: リセット
 
         isTempRevolution = false;
+        isNineForceActive = false;
         pendingSkipCount = 0;
         skipTurnAdvance = false;
         isFourStopWindowActive = false;
