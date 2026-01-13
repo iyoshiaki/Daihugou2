@@ -23,6 +23,8 @@ public class GameManager : MonoBehaviour
     // 勝敗・ゲーム進行管理用
     private List<PlayerBase> remainingPlayers; // まだあがっていないプレイヤー
     private Dictionary<PlayerBase, int> gameRanks = new(); // 順位 (Key:Player, Value:順位)
+    private Dictionary<PlayerBase, int> previousRoundRanks = new(); // 前回順位 (Key:Player, Value:順位)
+    private Dictionary<PlayerBase, string> previousRoundTitles = new(); // 前回ランク名 (Key:Player, Value:ランク名)
     private int currentRank = 1; // 現在の順位（1位からスタート）
     private bool isGameOver = false; // ゲーム（1ラウンド）終了フラグ
 
@@ -480,6 +482,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new TenDiscardRule());
         rules.Add(new GreatChaosRule());
         rules.Add(new NineForceRule());
+        rules.Add(new TwelvePenaltyRule());
     }
     void Update()
     {
@@ -1263,6 +1266,11 @@ public class GameManager : MonoBehaviour
             EnqueueMessage("大混乱! 手札がランダムに入れ替わります。");
             yield return new WaitForSeconds(1.0f);
             ApplyGreatChaos();
+        }
+        if (state.TriggerTwelvePenalty)
+        {
+            ApplyTwelvePenalty();
+            if (isGameOver) yield break;
         }
 
         pendingSkipCount = state.SkipCount;
@@ -2491,6 +2499,62 @@ public class GameManager : MonoBehaviour
         EndTurn();
     }
 
+    private Card GetStrongestCard(PlayerBase player)
+    {
+        return player.Hand
+            .OrderByDescending(c => GetCardStrength(c.IsJoker() ? 16 : c.Rank))
+            .ThenByDescending(c => c.Rank)
+            .FirstOrDefault();
+    }
+
+    private void ApplyTwelvePenalty()
+    {
+        if (previousRoundRanks.Count == 0)
+        {
+            Debug.Log("12ペナルティ: 前回順位がないためスキップします。");
+            return;
+        }
+
+        var targets = previousRoundRanks
+            .Where(entry => entry.Value == 1 || entry.Value == 2)
+            .Select(entry => entry.Key)
+            .Where(player => remainingPlayers.Contains(player))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        EnqueueMessage("12ペナルティ発動! 前回1位・2位は最強カードを捨てます。");
+
+        foreach (var target in targets)
+        {
+            if (target.Hand.Count == 0) continue;
+
+            var strongestCard = GetStrongestCard(target);
+            if (strongestCard == null) continue;
+
+            target.Hand.Remove(strongestCard);
+
+            if (target is HumanPlayer)
+            {
+                CreatePlayerCardSlots(human.Hand.Count);
+                PopulatePlayerHand(human);
+            }
+            else
+            {
+                Transform cpuArea = target.handArea;
+                if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, target.Hand.Count);
+            }
+
+            EnqueueMessage($"{target.Name} は最強カードを捨てました。");
+
+            CheckForWin(target);
+            if (isGameOver) break;
+        }
+    }
+
     private void ResetPlayButtonUI()
     {
         if (playButton != null)
@@ -2522,10 +2586,36 @@ public class GameManager : MonoBehaviour
             }
         }
     }
+    private string GetRankTitle(int rank)
+    {
+        return rank switch
+        {
+            1 => "大富豪",
+            2 => "富豪",
+            3 => "貧民",
+            4 => "大貧民",
+            _ => $"{rank}位"
+        };
+    }
+
+    private void SetPreviousRoundTitles()
+    {
+        previousRoundTitles.Clear();
+        foreach (var entry in previousRoundRanks)
+        {
+            previousRoundTitles[entry.Key] = GetRankTitle(entry.Value);
+        }
+    }
+
+
+
     private IEnumerator EndGameRoutine()
     {
         yield return new WaitForSeconds(2.0f);
         EnqueueMessage($"--- 第{currentGameCount}戦 終了 ---");
+
+        previousRoundRanks = new Dictionary<PlayerBase, int>(gameRanks);
+        SetPreviousRoundTitles();
 
         yield return new WaitForSeconds(3.0f);
 

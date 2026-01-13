@@ -19,6 +19,8 @@ public class GameState
     public int SixTradeCount { get; set; } = 0;
     public bool IsElevenSilence { get; set; } = false;
     public bool TriggerNineForce { get; set; } = false;
+    public bool TriggerTwelvePenalty { get; set; } = false;
+
 
 
     public GameState(List<Card> tableCards, int currentPlayerIndex)
