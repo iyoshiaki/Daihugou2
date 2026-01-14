@@ -73,6 +73,7 @@ public class GameManager : MonoBehaviour
     private bool isSixStopWindowActive = false;
     private int pendingEightCutCount = 0;
     private int pendingTwoCount = 0;
+    private int jokerStopTurnsRemaining = 0;
 
     private bool forceSingleNextTurn = false;
     private bool isSingleOnlyTurn = false;
@@ -93,6 +94,8 @@ public class GameManager : MonoBehaviour
     private bool isSuitBindActive = false;
     private int expectedNextRank = -1;
     private HashSet<Suit> boundSuits = new();
+
+    private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
 
 
 
@@ -154,6 +157,11 @@ public class GameManager : MonoBehaviour
 
         passButton.interactable = currentTurnIndex == 0;
 
+        if (IsJokerStopActive)
+        {
+            EnqueueMessage("ジョーカーストップ中!");
+        }
+
         if (currentTurnIndex == 0)
         {
             if (playButton != null) playButton.interactable = true;
@@ -177,6 +185,8 @@ public class GameManager : MonoBehaviour
     {
         // ゲーム終了時は何もしない
         if (isGameOver) return;
+
+        ConsumeJokerStopTurn();
 
         // --- 1. 8切りなどで「もう一度自分のターン」の場合 ---
         if (skipTurnAdvance)
@@ -329,6 +339,15 @@ public class GameManager : MonoBehaviour
     {
         var hand = cpu.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
+        if (IsJokerStopActive)
+        {
+            hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
+        if (hand.Count == 0)
+        {
+            return new List<Card>();
+        }
+
         if (isFourStopWindowActive)
         {
             return GetFourStopCards(hand, GetRequiredFourStopCount());
@@ -468,6 +487,24 @@ public class GameManager : MonoBehaviour
         var realCards = cards.Where(c => !c.IsJoker()).ToList();
         int jokerCount = cards.Count - realCards.Count;
         return (realCards, jokerCount);
+    }
+
+    private bool IsJokerStopTrigger(List<Card> played)
+    {
+        if (played == null || played.Count != 3) return false;
+        if (played.Any(c => c.IsJoker())) return false;
+        if (played.Select(c => c.Suit).Distinct().Count() != 1) return false;
+
+        var ranks = played.Select(c => c.Rank).OrderBy(r => r).ToList();
+        return ranks[0] == 3 && ranks[1] == 4 && ranks[2] == 5;
+    }
+
+    private void ConsumeJokerStopTurn()
+    {
+        if (jokerStopTurnsRemaining > 0)
+        {
+            jokerStopTurnsRemaining--;
+        }
     }
 
     public HumanPlayer humanPlayer => human;
@@ -893,6 +930,11 @@ public class GameManager : MonoBehaviour
     {
         if (selected == null || selected.Count == 0) return false;
 
+        if (IsJokerStopActive && selected.Any(c => c.IsJoker()))
+        {
+            return false;
+        }
+
         if (isFourStopWindowActive)
         {
             return IsFourStopCandidate(selected, GetRequiredFourStopCount());
@@ -1213,6 +1255,12 @@ public class GameManager : MonoBehaviour
         lastPlayedCards = new List<Card>(played);
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
         passCount = 0;
+
+        if (IsJokerStopTrigger(played))
+        {
+            jokerStopTurnsRemaining = 2;
+            EnqueueMessage("ジョーカーストップ発動!");
+        }
 
         // ★★★ スペード3返しのチェックと強制流し処理 ★★★
         bool isSpade3Counter = false;
@@ -1720,10 +1768,14 @@ public class GameManager : MonoBehaviour
         if (hand == null || hand.Count == 0) return new List<Card>();
 
         var fours = hand.Where(c => !c.IsJoker() && c.Rank == 4).ToList();
-        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        
         var candidates = new List<Card>();
         candidates.AddRange(fours);
-        if (joker != null) candidates.Add(joker);
+        if (!IsJokerStopActive)
+        {
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
+            if (joker != null) candidates.Add(joker);
+        }
 
         if (candidates.Count < requiredCount) return new List<Card>();
         return candidates.Take(requiredCount).ToList();
@@ -1734,16 +1786,24 @@ public class GameManager : MonoBehaviour
         if (hand == null || hand.Count == 0) return new List<Card>();
 
         var sixes = hand.Where(c => !c.IsJoker() && c.Rank == 6).ToList();
-        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        
         var candidates = new List<Card>();
         candidates.AddRange(sixes);
-        if (joker != null) candidates.Add(joker);
+        if (!IsJokerStopActive)
+        {
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
+            if (joker != null) candidates.Add(joker);
+        }
 
         if (candidates.Count < requiredCount) return new List<Card>();
         return candidates.Take(requiredCount).ToList();
     }
     private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
     {
+        if (IsJokerStopActive)
+        {
+            hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
         if (isFourStopWindowActive)
         {
             return GetFourStopCards(hand, GetRequiredFourStopCount());
