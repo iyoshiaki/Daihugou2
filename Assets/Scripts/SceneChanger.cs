@@ -42,10 +42,28 @@ public class SceneChanger : MonoBehaviour
         SceneManager.LoadScene("original");
     }
 
+    // 「ひとりで遊ぶ」オリジナルルールボタンを押したときに呼ぶ関数
+    public void GoToSoloOriginal()
+    {
+        SceneManager.LoadScene("SoloOriginal");
+    }
+
     // みんなで画面の「戻る」ボタンを押したときに呼ぶ関数
     public void BackToRulesetteings()
     {
         SceneManager.LoadScene("Rulesettings");
+    }
+
+    // 「ひとりで遊ぶ」を押したときに呼ぶ関数
+    public void GoToSoloRule()
+    {
+        SceneManager.LoadScene("SoloRule");
+    }
+
+    // 「ひとりで遊ぶ」オリジナルルール戻るを押したときに呼ぶ関数
+    public void BackToSoloRule()
+    {
+        SceneManager.LoadScene("SoloRule");
     }
 
     // Start is called before the first frame update
