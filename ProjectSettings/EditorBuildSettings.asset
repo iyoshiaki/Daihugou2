@@ -5,7 +5,7 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/SampleScene.unity
     guid: 2cda990e2423bbf4892e6590ba056729
   - enabled: 1
@@ -20,4 +20,13 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/minnade.unity
     guid: af699a9422b21254fa257890f164b08e
+  - enabled: 1
+    path: Assets/Scenes/SoloRule.unity
+    guid: 064ccc581347e7f4dba8faf16b7f7afc
+  - enabled: 1
+    path: Assets/Scenes/original.unity
+    guid: 7687b26422bb10d4ead49c41ecf07aae
+  - enabled: 1
+    path: Assets/Scenes/SoloOriginal.unity
+    guid: d2dfedb0003945a499bb5288118418ce
   m_configObjects: {}
