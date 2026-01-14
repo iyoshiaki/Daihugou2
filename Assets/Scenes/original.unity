@@ -3590,7 +3590,7 @@ GameObject:
   - component: {fileID: 1668863619}
   - component: {fileID: 1668863618}
   m_Layer: 5
-  m_Name: OKButton (1)
+  m_Name: OKButton
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
