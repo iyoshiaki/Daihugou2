@@ -70,7 +70,9 @@ public class GameManager : MonoBehaviour
     private bool skipTurnAdvance = false;
 
     private bool isFourStopWindowActive = false;
+    private bool isSixStopWindowActive = false;
     private int pendingEightCutCount = 0;
+    private int pendingTwoCount = 0;
 
 
     // ★ 革命状態フラグ
@@ -325,6 +327,10 @@ public class GameManager : MonoBehaviour
         if (isFourStopWindowActive)
         {
             return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
+        if (isSixStopWindowActive)
+        {
+            return GetSixStopCards(hand, GetRequiredSixStopCount());
         }
 
 
@@ -871,6 +877,10 @@ public class GameManager : MonoBehaviour
         {
             return IsFourStopCandidate(selected, GetRequiredFourStopCount());
         }
+        if (isSixStopWindowActive)
+        {
+            return IsSixStopCandidate(selected, GetRequiredSixStopCount());
+        }
 
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
 
@@ -968,7 +978,12 @@ public class GameManager : MonoBehaviour
         if (hand == null || hand.Count == 0) return false;
         if (field == null || field.Count == 0) return false;
 
-        int requiredCount = isFourStopWindowActive ? GetRequiredFourStopCount() : field.Count;
+        int requiredCount = isFourStopWindowActive
+            ? GetRequiredFourStopCount()
+            : isSixStopWindowActive
+                ? GetRequiredSixStopCount()
+                : field.Count;
+
         if (requiredCount <= 0 || hand.Count < requiredCount) return false;
 
         var combo = new List<Card>(requiredCount);
@@ -1223,12 +1238,19 @@ public class GameManager : MonoBehaviour
         }
 
         bool fourStopTriggered = false;
+        bool sixStopTriggered = false;
         if (!state.IsElevenSilence)
         {
             fourStopTriggered = isFourStopWindowActive && IsFourStopCandidate(played, GetRequiredFourStopCount());
             if (fourStopTriggered)
             {
                 state.TriggerRevolution = false;
+            }
+            sixStopTriggered = isSixStopWindowActive && IsSixStopCandidate(played, GetRequiredSixStopCount());
+            if (sixStopTriggered)
+            {
+                state.TriggerRevolution = false;
+                state.SixTradeCount = 0;
             }
         }
 
@@ -1291,6 +1313,15 @@ public class GameManager : MonoBehaviour
             yield return StartCoroutine(ClearTableAndRestart());
             yield break;
         }
+        if (sixStopTriggered)
+        {
+            isSixStopWindowActive = false;
+            pendingTwoCount = 0;
+            EnqueueMessage("6止め!");
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break;
+        }
 
         if (eightCutTriggered)
         {
@@ -1322,6 +1353,21 @@ public class GameManager : MonoBehaviour
                 }
             }
         }
+
+        if (!state.IsElevenSilence)
+        {
+            if (IsSixStopWindowEligible(effectivePlayedCards))
+            {
+                isSixStopWindowActive = true;
+                pendingTwoCount = effectivePlayedCards.Count(c => c.Rank == 15);
+            }
+            else
+            {
+                isSixStopWindowActive = false;
+                pendingTwoCount = 0;
+            }
+        }
+
 
         if (state.SixTradeCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
@@ -1448,6 +1494,8 @@ public class GameManager : MonoBehaviour
         skipTurnAdvance = false;
         isFourStopWindowActive = false;
         pendingEightCutCount = 0;
+        isSixStopWindowActive = false;
+        pendingTwoCount = 0;
         ResetBindState();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
@@ -1580,6 +1628,24 @@ public class GameManager : MonoBehaviour
         return effectivePlayed.Count <= 2;
     }
 
+    private bool IsSixStopWindowEligible(List<Card> effectivePlayed)
+    {
+        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
+        if (!effectivePlayed.All(c => c.Rank == 15)) return false;
+        return effectivePlayed.Count <= 2;
+    }
+
+    private int GetRequiredSixStopCount()
+    {
+        if (!isSixStopWindowActive) return 0;
+        return pendingTwoCount switch
+        {
+            1 => 2,
+            2 => 4,
+            _ => 0
+        };
+    }
+
     private int GetRequiredFourStopCount()
     {
         if (!isFourStopWindowActive) return 0;
@@ -1589,6 +1655,18 @@ public class GameManager : MonoBehaviour
             2 => 4,
             _ => 0
         };
+    }
+
+    private bool IsSixStopCandidate(List<Card> selected, int requiredCount)
+    {
+        if (requiredCount <= 0 || selected == null) return false;
+        if (selected.Count != requiredCount) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        if (realSelected.Any(c => c.Rank != 6)) return false;
+
+        return realSelected.Count + jokerCount == requiredCount;
     }
 
     private bool IsFourStopCandidate(List<Card> selected, int requiredCount)
@@ -1602,6 +1680,8 @@ public class GameManager : MonoBehaviour
 
         return realSelected.Count + jokerCount == requiredCount;
     }
+
+
 
     private List<Card> GetFourStopCards(List<Card> hand, int requiredCount)
     {
@@ -1617,11 +1697,29 @@ public class GameManager : MonoBehaviour
         if (candidates.Count < requiredCount) return new List<Card>();
         return candidates.Take(requiredCount).ToList();
     }
+    private List<Card> GetSixStopCards(List<Card> hand, int requiredCount)
+    {
+        if (requiredCount <= 0) return new List<Card>();
+        if (hand == null || hand.Count == 0) return new List<Card>();
+
+        var sixes = hand.Where(c => !c.IsJoker() && c.Rank == 6).ToList();
+        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        var candidates = new List<Card>();
+        candidates.AddRange(sixes);
+        if (joker != null) candidates.Add(joker);
+
+        if (candidates.Count < requiredCount) return new List<Card>();
+        return candidates.Take(requiredCount).ToList();
+    }
     private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
     {
         if (isFourStopWindowActive)
         {
             return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
+        if (isSixStopWindowActive)
+        {
+            return GetSixStopCards(hand, GetRequiredSixStopCount());
         }
         if (field == null || field.Count == 0)
         {
