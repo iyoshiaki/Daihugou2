@@ -21,18 +21,21 @@ public class GameManager : MonoBehaviour
     public Sprite cardBackSprite;
 
     // 勝敗・ゲーム進行管理用
-    private List<PlayerBase> remainingPlayers;
-    private Dictionary<PlayerBase, int> gameRanks = new();
-    private int currentRank = 1;
-    private bool isGameOver = false;
+    private List<PlayerBase> remainingPlayers; // まだあがっていないプレイヤー
+    private Dictionary<PlayerBase, int> gameRanks = new(); // 順位 (Key:Player, Value:順位)
+    private Dictionary<PlayerBase, int> previousRoundRanks = new(); // 前回順位 (Key:Player, Value:順位)
+    private Dictionary<PlayerBase, string> previousRoundTitles = new(); // 前回ランク名 (Key:Player, Value:ランク名)
+    private int currentRank = 1; // 現在の順位（1位からスタート）
+    private bool isGameOver = false; // ゲーム（1ラウンド）終了フラグ
 
     [Header("Rule Settings")]
     [Tooltip("7渡しや10捨てのような特殊アクションの結果としてあがることを禁止する")]
-    private bool forbidSpecialWin = false;
+    private bool forbidSpecialWin = false; // 初期値はOFF（許可）
 
+    // 4回戦の設定
     private const int TotalGames = 4;
     private int currentGameCount = 1;
-    private Dictionary<PlayerBase, int> totalPoints = new();
+    private Dictionary<PlayerBase, int> totalPoints = new(); // 累計スコア
 
     private HumanPlayer human;
     private List<CpuPlayer> cpuPlayers = new();
@@ -42,12 +45,15 @@ public class GameManager : MonoBehaviour
     private int passCount = 0;
     private int lastPlayedPlayerIndex = -1;
 
+    private int lastSkippedCount = 0;
+
     [SerializeField] private Button passButton;
     [SerializeField] private Button playButton;
 
     private List<PlayerBase> players;
 
     [SerializeField] private TextMeshProUGUI passMessageText;
+    [SerializeField] private TextMeshProUGUI SibariMessageText;
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
@@ -56,178 +62,42 @@ public class GameManager : MonoBehaviour
 
     private List<CardSlot> playerCardSlots = new();
 
+    // ターン管理用変数
     private int currentTurnIndex = 0;
     private bool isPlayerTurn = true;
 
     private List<IRule> rules = new List<IRule>();
     private bool skipTurnAdvance = false;
 
+    private bool isFourStopWindowActive = false;
+    private bool isSixStopWindowActive = false;
+    private int pendingEightCutCount = 0;
+    private int pendingTwoCount = 0;
+    private int jokerStopTurnsRemaining = 0;
+
+    private bool forceSingleNextTurn = false;
+    private bool isSingleOnlyTurn = false;
+
+    // ★ 革命状態フラグ
     private bool isRevolution = false;
+    // ★ 一時的な11バック状態フラグ
     private bool isTempRevolution = false;
+    private bool isElevenSilenceNextField = false;
+    private bool isNineForceActive = false;
 
-    private bool IsRevolutionActive => isRevolution ^ isTempRevolution;
+    // 現在の「強さ」計算プロパティ
+    // 革命中または11バック中なら、強さが逆になる
+    private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
 
-    private int pendingSkipCount = 0;
+    // --- 縛り状態 ---
+    private bool isNumberBindActive = false;
+    private bool isSuitBindActive = false;
+    private int expectedNextRank = -1;
+    private HashSet<Suit> boundSuits = new();
 
-    private bool isSevenPassMode = false;
-    private bool isTenDiscardMode = false;
-    private int pendingActionCardCount = 0;
+    private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
 
-    // ★各ルールへの参照を保持
-    private EightCutRule eightCutRule;
-    private RevolutionRule revolutionRule;
-    private ElevenBackRule elevenBackRule;
-    private FiveSkipRule fiveSkipRule;
-    private SevenPassRule sevenPassRule;
-    private TenDiscardRule tenDiscardRule;
 
-    // ================================================
-    // --- 公開メソッド（Ruleクラスから呼び出し用）---
-    // ================================================
-
-    public List<PlayerBase> GetPlayers() => players;
-    public bool GetForbidSpecialWin() => forbidSpecialWin;
-    public bool IsGameOver() => isGameOver;
-
-    public void ResetPassCount()
-    {
-        passCount = 0;
-    }
-
-    public void ResetPendingSkipCount()
-    {
-        pendingSkipCount = 0;
-    }
-
-    public void ResetTempRevolution()
-    {
-        isTempRevolution = false;
-    }
-
-    public void SetSkipTurnAdvance(bool value)
-    {
-        skipTurnAdvance = value;
-    }
-
-    public bool IsPlayerRemaining(PlayerBase player)
-    {
-        return remainingPlayers.Contains(player);
-    }
-
-    public void SetSevenPassMode(bool active, int count)
-    {
-        isSevenPassMode = active;
-        pendingActionCardCount = count;
-    }
-
-    public void SetTenDiscardMode(bool active, int count)
-    {
-        isTenDiscardMode = active;
-        pendingActionCardCount = count;
-    }
-
-    public void ShowSevenPassUI(string message)
-    {
-        passMessageText.text = message;
-        passMessageText.gameObject.SetActive(true);
-
-        ResetPlayerSelection();
-        CreatePlayerCardSlots(human.Hand.Count);
-        PopulatePlayerHand(human);
-
-        if (passButton != null) passButton.interactable = false;
-        if (playButton != null)
-        {
-            playButton.interactable = false;
-            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "あげる";
-        }
-    }
-
-    public void ShowTenDiscardUI(string message)
-    {
-        passMessageText.text = message;
-        passMessageText.gameObject.SetActive(true);
-
-        ResetPlayerSelection();
-        CreatePlayerCardSlots(human.Hand.Count);
-        PopulatePlayerHand(human);
-
-        if (passButton != null) passButton.interactable = false;
-        if (playButton != null)
-        {
-            playButton.interactable = false;
-            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "捨てる";
-        }
-    }
-
-    public void HideActionMessage()
-    {
-        passMessageText.gameObject.SetActive(false);
-        passMessageText.text = "";
-    }
-
-    public void RemoveCardsFromPlayerUI(List<Card> cards)
-    {
-        var cardViews = handAreaPlayer.GetComponentsInChildren<CardView>().ToList();
-        foreach (var cv in cardViews)
-            if (cv != null && cv.CardData != null && cards.Contains(cv.CardData))
-                Destroy(cv.gameObject);
-    }
-
-    public void UpdatePlayerHandDisplay(PlayerBase player)
-    {
-        if (player is HumanPlayer)
-        {
-            CreatePlayerCardSlots(human.Hand.Count);
-            PopulatePlayerHand(human);
-        }
-        else
-        {
-            Transform cpuArea = null;
-            if (player == cpuPlayers[0]) cpuArea = handAreaCPU1;
-            else if (player == cpuPlayers[1]) cpuArea = handAreaCPU2;
-            else if (player == cpuPlayers[2]) cpuArea = handAreaCPU3;
-
-            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, player.Hand.Count);
-        }
-    }
-
-    public void ResetPlayButtonUI()
-    {
-        if (playButton != null)
-        {
-            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "出す";
-            playButton.interactable = false;
-        }
-        if (passButton != null) passButton.interactable = true;
-    }
-
-    public void EndPlayerTurn()
-    {
-        EndTurn();
-    }
-
-    public void CheckForWin(PlayerBase player)
-    {
-        if (player.Hand.Count == 0)
-        {
-            gameRanks[player] = currentRank;
-            EnqueueMessage($"{player.Name} があがりました! ({currentRank}位)");
-
-            currentRank++;
-            remainingPlayers.Remove(player);
-
-            if (remainingPlayers.Count <= 1)
-            {
-                var lastPlayer = remainingPlayers[0];
-                gameRanks[lastPlayer] = currentRank;
-                EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
-
-                isGameOver = true;
-                StartCoroutine(EndGameRoutine());
-            }
-        }
-    }
 
     public void SetForbidSpecialWin(bool value)
     {
@@ -235,14 +105,19 @@ public class GameManager : MonoBehaviour
         Debug.Log($"禁止あがりルールが {(value ? "ON" : "OFF")} に設定されました。");
     }
 
+    // ★カードの強さを数値化するメソッド (修正: Jokerを最強に設定)
     public int GetCardStrength(int rank)
     {
-        int power = 0;
-        if (rank == 16) power = 14;
-        else if (rank == 15) power = 13;
-        else if (rank == 14) power = 12;
-        else power = rank - 3;
+        // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
+        // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16=Joker
 
+        int power = 0;
+        if (rank == 16) power = 14; // Joker (最強)
+        else if (rank == 15) power = 13; // 2
+        else if (rank == 14) power = 12; // A
+        else power = rank - 3; // 3 => 0, 4 => 1 ... 13(K) => 10
+
+        // 革命中なら強さを反転 (大きい値ほど弱いことにする)
         if (IsRevolutionActive)
         {
             return -power;
@@ -250,13 +125,42 @@ public class GameManager : MonoBehaviour
         return power;
     }
 
+    // 現在のカード強さ比較用変数 (5飛ばし等用)
+    private int pendingSkipCount = 0;
+
+    private bool isSevenPassMode = false;   // 7渡しモード中か
+    private bool isTenDiscardMode = false;  // 10捨てモード中か
+
+    private bool isSixTradeMode = false;    // 6トレードモード中か
+    private bool isSelectingTradeTarget = false;
+    private bool isSelectingTradeCards = false;
+    private bool isSelectingTradeSourceCards = false;
+
+    private int pendingActionCardCount = 0; // 渡す/捨てる枚数
+
+    private int pendingTradeCardCount = 0;  // 6トレードの枚数
+    private PlayerBase tradeSourcePlayer;
+    private PlayerBase tradeTargetPlayer;
+    private List<PlayerBase> tradeTargetCandidates = new();
+    private int tradeTargetIndex = 0;
+    private List<Card> pendingTradeSourceCards = new();
+
+
     // ================================================
     // --- ターン制管理メソッド ---
     // ================================================
 
-    public void StartTurn()
+    private void StartTurn()
     {
+        isSingleOnlyTurn = forceSingleNextTurn;
+        forceSingleNextTurn = false;
+
         passButton.interactable = currentTurnIndex == 0;
+
+        if (IsJokerStopActive)
+        {
+            EnqueueMessage("ジョーカーストップ中!");
+        }
 
         if (currentTurnIndex == 0)
         {
@@ -277,32 +181,43 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    public void EndTurn()
+    private void EndTurn()
     {
+        // ゲーム終了時は何もしない
         if (isGameOver) return;
 
+        ConsumeJokerStopTurn();
+
+        // --- 1. 8切りなどで「もう一度自分のターン」の場合 ---
         if (skipTurnAdvance)
         {
             skipTurnAdvance = false;
             pendingSkipCount = 0;
 
+            // もし「俺のターン」と言った自分が、まだあがっていなければ（手札があれば）
             if (remainingPlayers.Contains(players[currentTurnIndex]))
             {
+                // インデックスを変えずに、もう一度自分のターンへ
                 StartCoroutine(NextTurnDelay());
                 return;
             }
         }
 
+        // --- 2. 通常のターン進行 ---
+
         int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
 
-        pendingSkipCount = 0;
+        pendingSkipCount = 0; // スキップ数をリセット
 
+        // --- 3. あがったプレイヤー（remainingPlayersにいない人）をスキップする ---
         int loopSafety = 0;
 
+        // 次の候補者が「あがった人」である間、インデックスを進め続ける
         while (!remainingPlayers.Contains(players[nextTurnIndex]))
         {
             nextTurnIndex = (nextTurnIndex + 1) % players.Count;
 
+            // 無限ループ防止（全員あがってしまった場合など）
             loopSafety++;
             if (loopSafety > players.Count + 2)
             {
@@ -312,9 +227,33 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        // --- 4. プレイヤー確定 ---
         currentTurnIndex = nextTurnIndex;
 
         StartCoroutine(NextTurnDelay());
+    }
+
+    private IEnumerator CpuPlayCards(PlayerBase cpu)
+    {
+        List<Card> cardsToPlay = cpu.SelectCards(cpu.HandCards);
+        if (cardsToPlay == null || cardsToPlay.Count == 0) yield break;
+
+        foreach (Card card in cardsToPlay)
+        {
+            CardView cardView = FindCardViewForCard(card, cpu);
+            if (cardView != null)
+            {
+                Vector3 targetPos = tableArea.position;
+                yield return StartCoroutine(cardView.MoveTo(targetPos, 0.4f));
+
+                cardView.transform.SetParent(tableArea);
+                cardView.transform.localPosition = new Vector3(0, 0, -cpu.Hand.Count * 0.01f);
+            }
+        }
+
+        foreach (Card card in cardsToPlay) cpu.HandCards.Remove(card);
+
+        yield return new WaitForSeconds(0.5f);
     }
 
     private CardView FindCardViewForCard(Card card, PlayerBase player)
@@ -368,21 +307,31 @@ public class GameManager : MonoBehaviour
 
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
 
-        if (isSevenPassMode || isTenDiscardMode)
+        // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
         {
             yield break;
         }
 
+        // ★追加修正: スペード3返しなどで場が流れた場合（lastPlayedCards.Count == 0）、
+        // ClearTableAndRestart() の中で既に StartTurn() が呼ばれているため、
+        // ここで EndTurn() を呼ぶとターンが二重に進んでしまい、次のプレイヤーがスキップされます。
+
+        // 8切りは lastPlayedCards.Count == 0 かつ skipTurnAdvance が true に設定され、EndTurn() に到達させる必要があります。
+        // それ以外の場で流れたケース（スペード3返し、全員パス後のClearTableAndRestart）は StartTurn() が呼ばれているため、ここで終了させます。
         bool clearedBySpade3OrPass = lastPlayedCards.Count == 0 && !skipTurnAdvance;
 
         if (clearedBySpade3OrPass)
         {
+            // ClearTableAndRestart() が StartTurn() を呼び、次のプレイヤーにターンが移っているため、
+            // ここで EndTurn() を呼ぶと二重にターンが進んでしまうのを防ぐため break します。
             yield break;
         }
 
         yield return new WaitForSeconds(0.8f);
         EndTurn();
     }
+
     // ================================================
     // --- CPUの出せるカード判定ロジック ---
     // ================================================
@@ -390,45 +339,93 @@ public class GameManager : MonoBehaviour
     {
         var hand = cpu.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
+        if (IsJokerStopActive)
+        {
+            hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
+        if (hand.Count == 0)
+        {
+            return new List<Card>();
+        }
+
+        if (isFourStopWindowActive)
+        {
+            return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
+        if (isSixStopWindowActive)
+        {
+            return GetSixStopCards(hand, GetRequiredSixStopCount());
+        }
+
+        if (isSingleOnlyTurn)
+        {
+            if (field != null && field.Count > 0 && field.Count != 1)
+            {
+                return new List<Card>();
+            }
+
+            if (field == null || field.Count == 0)
+            {
+                var single = new List<Card> { hand.First() };
+                return IsBindSatisfied(single) ? single : new List<Card>();
+            }
+        }
+
+
         if (field == null || field.Count == 0)
         {
             var stairs = FindStairSequences(hand);
             if (stairs.Count > 0)
             {
                 var chosen = stairs[Random.Range(0, stairs.Count)];
-                return chosen;
+                return IsBindSatisfied(chosen) ? chosen : new List<Card>();
             }
-            return new List<Card> { hand.First() };
+            var single = new List<Card> { hand.First() };
+            return IsBindSatisfied(single) ? single : new List<Card>();
         }
 
-        bool isFieldStair = IsStair(field);
+        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
+        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
         int fieldCount = field.Count;
         int fieldRank = field[0].Rank;
 
         if (!isFieldStair)
         {
+            // ★追加: 相手がジョーカー単体の場合、スペードの3を持っていれば出す
+            // (通常はJokerが最強なので、これ以外のカードは出せない)
             if (fieldCount == 1 && field[0].IsJoker())
             {
                 var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
                 if (spade3 != null)
                 {
-                    return new List<Card> { spade3 };
+                    var candidate = new List<Card> { spade3 };
+                    return IsBindSatisfied(candidate) ? candidate : new List<Card>();
                 }
+                // スペード3がなければ、ジョーカーには勝てないのでパス(空リスト返却)
                 return new List<Card>();
             }
 
+            // 通常処理
             var fieldStrength = GetCardStrength(fieldRank);
+
+            // ジョーカー単体の場合、fieldRankはどうなっているか？
+            // 実際のロジックでは IsValidPlay 側で Joker = 16 と判定するが、
+            // ここでは field[0].Rank を見ている。Cardクラスの定義によるが、
+            // JokerのRankが適切に設定されていないと fieldStrength がおかしくなる可能性がある。
+            // ただし上の if (IsJoker) ブロックで処理しているので、ここはJoker以外が流れてくる想定。
 
             var candidates = hand
                 .GroupBy(c => c.Rank)
                 .Where(g => g.Count() >= fieldCount && GetCardStrength(g.Key) > fieldStrength)
-                .OrderBy(g => GetCardStrength(g.Key))
+                .OrderBy(g => GetCardStrength(g.Key)) // 弱い順に出す
                 .FirstOrDefault();
 
-            return candidates?.Take(fieldCount).ToList() ?? new List<Card>();
+            var candidateList = candidates?.Take(fieldCount).ToList() ?? new List<Card>();
+            return candidateList.Count > 0 && IsBindSatisfied(candidateList) ? candidateList : new List<Card>();
         }
         else
         {
+            // 階段の処理（省略・既存通り）
         }
         return new List<Card>();
     }
@@ -492,6 +489,24 @@ public class GameManager : MonoBehaviour
         return (realCards, jokerCount);
     }
 
+    private bool IsJokerStopTrigger(List<Card> played)
+    {
+        if (played == null || played.Count != 3) return false;
+        if (played.Any(c => c.IsJoker())) return false;
+        if (played.Select(c => c.Suit).Distinct().Count() != 1) return false;
+
+        var ranks = played.Select(c => c.Rank).OrderBy(r => r).ToList();
+        return ranks[0] == 3 && ranks[1] == 4 && ranks[2] == 5;
+    }
+
+    private void ConsumeJokerStopTurn()
+    {
+        if (jokerStopTurnsRemaining > 0)
+        {
+            jokerStopTurnsRemaining--;
+        }
+    }
+
     public HumanPlayer humanPlayer => human;
 
     void Start()
@@ -519,22 +534,19 @@ public class GameManager : MonoBehaviour
         remainingPlayers = new List<PlayerBase>(players);
         currentGameCount = 1;
 
-        // ★各ルールのインスタンスを保持
-        eightCutRule = new EightCutRule();
-        revolutionRule = new RevolutionRule();
-        elevenBackRule = new ElevenBackRule();
-        fiveSkipRule = new FiveSkipRule();
-        sevenPassRule = new SevenPassRule();
-        tenDiscardRule = new TenDiscardRule();
-
-        rules.Add(eightCutRule);
-        rules.Add(revolutionRule);
-        rules.Add(elevenBackRule);
-        rules.Add(fiveSkipRule);
-        rules.Add(sevenPassRule);
-        rules.Add(tenDiscardRule);
+        rules.Add(new ElevenSilenceRule());
+        rules.Add(new EightCutRule());
+        rules.Add(new RevolutionRule());
+        rules.Add(new ElevenBackRule());
+        rules.Add(new FiveSkipRule());
+        rules.Add(new FourSingleRule());
+        rules.Add(new SixTradeRule());
+        rules.Add(new SevenPassRule());
+        rules.Add(new TenDiscardRule());
+        rules.Add(new GreatChaosRule());
+        rules.Add(new NineForceRule());
+        rules.Add(new TwelvePenaltyRule());
     }
-
     void Update()
     {
         if (playButton != null && passButton != null)
@@ -545,7 +557,7 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
-        if (!isPlayerTurn)
+        if (!isPlayerTurn && !IsTradeSelectionActive())
         {
             if (playButton != null) playButton.gameObject.SetActive(false);
             if (passButton != null) passButton.gameObject.SetActive(false);
@@ -556,22 +568,32 @@ public class GameManager : MonoBehaviour
         {
             playButton.gameObject.SetActive(true);
 
-            if (isSevenPassMode || isTenDiscardMode)
+            if (isSelectingTradeTarget)
+            {
+                playButton.interactable = true;
+                if (passButton != null)
+                {
+                    passButton.gameObject.SetActive(true);
+                    passButton.interactable = true;
+                }
+                return;
+            }
+
+            if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
             {
                 if (playButton != null)
                 {
                     playButton.gameObject.SetActive(true);
 
                     int selectedCount = human.SelectCards(human.Hand).Count;
-                    int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-                    playButton.interactable = (selectedCount >= 0 && selectedCount <= required);
+                    int required = isSelectingTradeCards
+                        ? Mathf.Min(pendingTradeCardCount, human.Hand.Count)
+                        : Mathf.Min(pendingActionCardCount, human.Hand.Count);
+
+                    playButton.interactable = (selectedCount == required);
                 }
-                if (passButton != null)
-                {
-                    passButton.gameObject.SetActive(true);
-                    passButton.interactable = true;
-                }
+                if (passButton != null) passButton.gameObject.SetActive(false);
                 return;
             }
 
@@ -593,8 +615,35 @@ public class GameManager : MonoBehaviour
             {
                 bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
                 passButton.gameObject.SetActive(!isFieldEmpty);
+                if (!isFieldEmpty)
+                {
+                    bool canPass = true;
+                    if (isNineForceActive)
+                    {
+                        canPass = !HasValidPlayForNineForce(human.Hand, lastPlayedCards);
+                    }
+                    passButton.interactable = canPass;
+                }
             }
         }
+    }
+
+    private bool IsAnyCardSelected()
+    {
+        foreach (Transform child in handAreaPlayer)
+        {
+            var cv = child.GetComponent<CardView>();
+            if (cv != null && cv.IsSelected)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool IsTradeSelectionActive()
+    {
+        return isSelectingTradeTarget || isSelectingTradeCards;
     }
 
     private void CreatePlayerCardSlots(int slotCount)
@@ -686,7 +735,7 @@ public class GameManager : MonoBehaviour
 
         List<Card> playableCards;
 
-        if (isSevenPassMode || isTenDiscardMode)
+        if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
         {
             playableCards = new List<Card>(player.Hand);
         }
@@ -743,15 +792,59 @@ public class GameManager : MonoBehaviour
             LayoutRebuilder.ForceRebuildLayoutImmediate(cpuArea.GetComponent<RectTransform>());
         }
     }
+
+
+
+    private void ApplyGreatChaos()
+    {
+        var activePlayers = remainingPlayers.Where(player => player.Hand.Count > 0).ToList();
+        if (activePlayers.Count <= 1)
+        {
+            return;
+        }
+
+        var hands = activePlayers.Select(player => new List<Card>(player.Hand)).ToList();
+
+        for (int i = 0; i < hands.Count; i++)
+        {
+            int rand = Random.Range(i, hands.Count);
+            (hands[i], hands[rand]) = (hands[rand], hands[i]);
+        }
+
+        for (int i = 0; i < activePlayers.Count; i++)
+        {
+            activePlayers[i].Hand = hands[i];
+            activePlayers[i].SelectedCards.Clear();
+        }
+
+        if (human != null)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+
+        if (cpuPlayers.Count > 0) PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
+        if (cpuPlayers.Count > 1) PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
+        if (cpuPlayers.Count > 2) PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
+    }
+
     private IEnumerator PlayerPlayRoutine(List<Card> played)
     {
         yield return StartCoroutine(DisplayPlayedCardsOnTable(human, played));
 
-        if (isSevenPassMode || isTenDiscardMode)
+        // 7渡しや10捨てが開始された場合、DisplayPlayedCardsOnTableの中で処理が分岐するため、
+        // ここには到達しないはずだが、念のためガード。
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
         {
             yield break;
         }
 
+        // ★修正ポイント: スペード3返しなどにより DisplayPlayedCardsOnTable の中で場が流れた場合、
+        // ClearTableAndRestart() が呼ばれ、既に StartTurn() によってターンが再開されている。
+        // そのため、ここで EndTurn() を実行するとターンが二重に進んでしまうため、スキップする。
+        //
+        // 場が空で (lastPlayedCards.Count == 0)、かつ8切りによるターン継続ではない (!skipTurnAdvance) 
+        // 場合は、場が流れたと判断できる。
         if (lastPlayedCards.Count == 0 && !skipTurnAdvance)
         {
             yield break;
@@ -762,9 +855,19 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
+        if (isSelectingTradeTarget)
+        {
+            ConfirmTradeTargetSelection();
+            return;
+        }
+
+        if (isSelectingTradeCards)
+        {
+            HandleTradeCardSelection();
+            return;
+        }
         if (!isPlayerTurn) return;
 
-        // ★7渡しモード時の処理をSevenPassRuleに委譲
         if (isSevenPassMode)
         {
             var selected = human.SelectCards(human.Hand);
@@ -773,39 +876,36 @@ public class GameManager : MonoBehaviour
             if (selected.Count != required)
             {
                 EnqueueMessage($"{required}枚 選んでください");
+                ClearPassMessage();
                 return;
             }
 
             playButton.interactable = false;
-            StartCoroutine(sevenPassRule.ExecuteSevenPassTransfer(this, human, selected));
+            StartCoroutine(ExecuteSevenPassTransfer(human, selected));
             return;
         }
 
-        // ★10捨てモード時の処理をTenDiscardRuleに委譲
         if (isTenDiscardMode)
         {
             var selected = human.SelectCards(human.Hand);
-            int maxAllowed = pendingActionCardCount;
+            int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-            if (selected.Count > maxAllowed)
+            if (selected.Count != required)
             {
-                EnqueueMessage($"最大 {maxAllowed}枚 選んでください");
+                EnqueueMessage($"{required}枚 選んでください");
+                ClearPassMessage();
                 return;
             }
 
-            // 0枚選択も許可するため、selected.Count == required のチェックは不要。
-            // ここに到達した時点で、選択枚数は 0 <= selected.Count <= maxAllowed である。
-
             playButton.interactable = false;
-            // 選択されたカードリストを渡す
-            StartCoroutine(tenDiscardRule.ExecuteTenDiscardAction(this, human, selected));
+            StartCoroutine(ExecuteTenDiscardAction(human, selected));
             return;
         }
 
         if (playButton != null && !playButton.interactable) return;
         if (playButton != null) playButton.interactable = false;
 
-        var played = human.SelectCards(human.Hand);
+        var played = human.SelectCards(human.Hand); ;
 
         if (played == null || played.Count == 0)
         {
@@ -830,7 +930,28 @@ public class GameManager : MonoBehaviour
     {
         if (selected == null || selected.Count == 0) return false;
 
+        if (IsJokerStopActive && selected.Any(c => c.IsJoker()))
+        {
+            return false;
+        }
+
+        if (isFourStopWindowActive)
+        {
+            return IsFourStopCandidate(selected, GetRequiredFourStopCount());
+        }
+        if (isSixStopWindowActive)
+        {
+            return IsSixStopCandidate(selected, GetRequiredSixStopCount());
+        }
+
+        if (isSingleOnlyTurn && selected.Count != 1)
+        {
+            return false;
+        }
+
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        // --- 単体・役のチェック ---
 
         bool isRankGroup = false;
         bool isStair = false;
@@ -850,16 +971,22 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
+        // --- 場に出ているカードとの比較 ---
         if (field != null && field.Count > 0)
         {
+            bool isSpade3Counter = false;
+            // ★追加: スペードの3はジョーカー単体出しに勝てるルール
+            // 場がジョーカー1枚の場合のみ
             if (field.Count == 1 && field[0].IsJoker())
             {
+                // 自分が出すのが「スペード」かつ「Rank3」かつ「1枚」ならOK
                 if (selected.Count == 1 && selected[0].Suit == Suit.Spade && selected[0].Rank == 3)
                 {
-                    return true;
+                    isSpade3Counter = true;
                 }
             }
 
+            // 枚数チェック
             if (selected.Count != field.Count) return false;
 
             var (realField, fieldJokerCount) = GetRealCardsAndJokers(field);
@@ -877,6 +1004,7 @@ public class GameManager : MonoBehaviour
             }
             else
             {
+                // 場がジョーカーのみの場合は最強(Rank 16相当)とする
                 if (realField.Count == 0 && fieldJokerCount > 0)
                 {
                     fieldStrongestRank = 16;
@@ -886,6 +1014,7 @@ public class GameManager : MonoBehaviour
                     fieldStrongestRank = realField.Count > 0 ? realField[0].Rank : 3;
                 }
 
+                // 自分が出すカードがジョーカーのみの場合は最強(Rank 16相当)とする
                 if (realSelected.Count == 0 && jokerCount > 0)
                 {
                     selectedStrongestRank = 16;
@@ -899,19 +1028,68 @@ public class GameManager : MonoBehaviour
             int fieldStrength = GetCardStrength(fieldStrongestRank);
             int selectedStrength = GetCardStrength(selectedStrongestRank);
 
-            if (selectedStrength <= fieldStrength) return false;
+            // 同じ強さ以下なら出せない
+            if (!isSpade3Counter && selectedStrength <= fieldStrength) return false;
+        }
+
+        if (field != null && field.Count > 0 && !IsBindSatisfied(selected))
+        {
+            return false;
         }
 
         return true;
     }
 
+    private bool HasValidPlayForNineForce(List<Card> hand, List<Card> field)
+    {
+        if (hand == null || hand.Count == 0) return false;
+        if (field == null || field.Count == 0) return false;
+
+        int requiredCount = isFourStopWindowActive
+            ? GetRequiredFourStopCount()
+            : isSixStopWindowActive
+                ? GetRequiredSixStopCount()
+                : field.Count;
+
+        if (requiredCount <= 0 || hand.Count < requiredCount) return false;
+
+        var combo = new List<Card>(requiredCount);
+        bool found = false;
+
+        void Search(int startIndex)
+        {
+            if (found) return;
+            if (combo.Count == requiredCount)
+            {
+                if (IsValidPlay(hand, combo, field))
+                {
+                    found = true;
+                }
+                return;
+            }
+
+            for (int i = startIndex; i <= hand.Count - (requiredCount - combo.Count); i++)
+            {
+                combo.Add(hand[i]);
+                Search(i + 1);
+                combo.RemoveAt(combo.Count - 1);
+                if (found) return;
+            }
+        }
+
+        Search(0);
+        return found;
+    }
+
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
         int totalCards = realCards.Count + jokerCount;
+        // ★修正: 合計枚数を3枚または4枚に制限
         if (totalCards < 3 || totalCards > 4) return false;
 
         if (realCards.Count == 0)
         {
+            // ジョーカーのみで階段を構成する場合 (例: J-J-J => 3枚階段)
             return jokerCount >= 3;
         }
 
@@ -940,6 +1118,7 @@ public class GameManager : MonoBehaviour
         int realStairLength = sortedRanks.Count;
         int finalStairLength = realStairLength + requiredJokers + remainingJokers;
 
+        // ★修正: 既に totalCards でチェックしているが、ロジックの確認のため再度チェック
         return finalStairLength >= 3 && finalStairLength <= 4;
     }
 
@@ -956,40 +1135,18 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
+        if (isSelectingTradeTarget)
+        {
+            CycleTradeTargetSelection();
+            return;
+        }
         if (players[currentTurnIndex] != humanPlayer) return;
-
-        // ★修正点 1: 特殊アクションモード中はすぐにパスボタンを非活性化する
-        if (isSevenPassMode || isTenDiscardMode)
-        {
-            passButton.interactable = false;
-            playButton.interactable = false;
-        }
-
-        if (isSevenPassMode)
-        {
-            // 7渡しモードでパス（カードをあげない）
-            playButton.interactable = false;
-            // 0枚のリストを渡して ExecuteSevenPassTransfer を実行
-            StartCoroutine(sevenPassRule.ExecuteSevenPassTransfer(this, human, new List<Card>()));
-            return;
-        }
-
-        if (isTenDiscardMode)
-        {
-            // 10捨てモードでパス（カードを捨てない）
-            playButton.interactable = false;
-            // 0枚のリストを渡して ExecuteTenDiscardAction を実行
-            StartCoroutine(tenDiscardRule.ExecuteTenDiscardAction(this, human, new List<Card>()));
-            return;
-        }
-
-        // 通常のターンでのパス処理
         HandlePass();
     }
 
     private IEnumerator DisplayPlayedCardsOnTable(PlayerBase currentPlayer, List<Card> played)
     {
-        float spacing = 20f;
+        float spacing = 50f;
         int existingCards = tableArea.childCount;
         Vector3 basePos = tableArea.position;
         float startX = basePos.x - (played.Count - 1) * spacing / 2f;
@@ -1009,7 +1166,9 @@ public class GameManager : MonoBehaviour
         List<CardView> allCardViews = sourceArea.GetComponentsInChildren<CardView>().ToList();
         var playedViews = new List<CardView>();
 
+        // --- プレイ前の場のカードを一時保存 (スペード3返しの判定に使う) ---
         List<Card> fieldBeforePlay = new List<Card>(lastPlayedCards);
+
 
         for (int i = 0; i < played.Count; i++)
         {
@@ -1088,7 +1247,7 @@ public class GameManager : MonoBehaviour
         if (currentPlayer is HumanPlayer)
         {
             foreach (var c in played) human.Hand.Remove(c);
-            RemoveCardsFromPlayerUI(played);
+            RemovePlayedCardsFromUI(played);
         }
         CheckForWin(currentPlayer);
         if (isGameOver) yield break;
@@ -1097,10 +1256,19 @@ public class GameManager : MonoBehaviour
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
         passCount = 0;
 
+        if (IsJokerStopTrigger(played))
+        {
+            jokerStopTurnsRemaining = 2;
+            EnqueueMessage("ジョーカーストップ発動!");
+        }
+
+        // ★★★ スペード3返しのチェックと強制流し処理 ★★★
         bool isSpade3Counter = false;
 
+        // 場のカードがジョーカー1枚 (fieldBeforePlayを使う)
         if (fieldBeforePlay.Count == 1 && fieldBeforePlay[0].IsJoker())
         {
+            // 出したカードがスペード3の1枚出し
             if (played.Count == 1 && played[0].Suit == Suit.Spade && played[0].Rank == 3)
             {
                 isSpade3Counter = true;
@@ -1110,73 +1278,276 @@ public class GameManager : MonoBehaviour
         if (isSpade3Counter)
         {
             EnqueueMessage("スペード3返し！場が流れます。");
+            // ★修正: 強制流しの前に一時的な革命状態をリセット
             isTempRevolution = false;
 
+            // 強制的に場を流す (lastPlayedPlayerIndexに基づいて次のターン開始プレイヤーが決定される)
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break; // 強制流し後は通常のターン終了処理（EndTurn）をスキップ
+        }
+
+
+        List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
+        var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
+
+        bool isSilenceCarryover = isElevenSilenceNextField;
+
+        if (isSilenceCarryover)
+        {
+            isElevenSilenceNextField = false;
+            state.IsElevenSilence = true;
+        }
+        else
+        {
+            foreach (var rule in rules)
+            {
+                if (rule.CanApply(effectivePlayedCards, state))
+                {
+                    rule.Apply(effectivePlayedCards, state);
+                    if (state.IsElevenSilence) break;
+                }
+            }
+        }
+
+        bool fourStopTriggered = false;
+        bool sixStopTriggered = false;
+        if (!state.IsElevenSilence)
+        {
+            fourStopTriggered = isFourStopWindowActive && IsFourStopCandidate(played, GetRequiredFourStopCount());
+            if (fourStopTriggered)
+            {
+                state.TriggerRevolution = false;
+            }
+            sixStopTriggered = isSixStopWindowActive && IsSixStopCandidate(played, GetRequiredSixStopCount());
+            if (sixStopTriggered)
+            {
+                state.TriggerRevolution = false;
+                state.SixTradeCount = 0;
+            }
+        }
+
+        if (state.IsElevenSilence)
+        {
+            EnqueueMessage(isSilenceCarryover ? "11サイレンス中!" : "11サイレンス!");
+            if (!isSilenceCarryover)
+            {
+                isElevenSilenceNextField = true;
+            }
+        }
+
+        if (state.ForceSingleNextTurn)
+        {
+            forceSingleNextTurn = true;
+            EnqueueMessage("4シングル! 次のターンは1枚出しのみ。");
+        }
+
+        if (state.TriggerNineForce)
+        {
+            isNineForceActive = true;
+            EnqueueMessage("9フォース発動!");
+        }
+
+        if (state.TriggerRevolution)
+        {
+            isRevolution = !isRevolution;
+            EnqueueMessage(isRevolution ? "革命開始!" : "革命終了!");
+        }
+
+        if (state.IsElevenBack)
+        {
+            EnqueueMessage("11バック!");
+            isTempRevolution = true;
+        }
+
+        UpdateBindState(fieldBeforePlay, effectivePlayedCards);
+
+        if (state.TriggerGreatChaos)
+        {
+            EnqueueMessage("大混乱! 手札がランダムに入れ替わります。");
+            yield return new WaitForSeconds(1.0f);
+            ApplyGreatChaos();
+        }
+        if (state.TriggerTwelvePenalty)
+        {
+            ApplyTwelvePenalty();
+            if (isGameOver) yield break;
+        }
+
+        pendingSkipCount = state.SkipCount;
+        lastSkippedCount = state.SkipCount;
+        if (pendingSkipCount > 0)
+        {
+            EnqueueMessage($"{pendingSkipCount}人飛ばし!");
+        }
+
+        bool eightCutTriggered = state.IsEightCut;
+
+        if (fourStopTriggered)
+        {
+            isFourStopWindowActive = false;
+            pendingEightCutCount = 0;
+            EnqueueMessage("4止め!");
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break;
+        }
+        if (sixStopTriggered)
+        {
+            isSixStopWindowActive = false;
+            pendingTwoCount = 0;
+            EnqueueMessage("6止め!");
             yield return new WaitForSeconds(1.0f);
             yield return StartCoroutine(ClearTableAndRestart());
             yield break;
         }
 
-        List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
-        var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
-
-        foreach (var rule in rules)
+        if (eightCutTriggered)
         {
-            if (rule.CanApply(effectivePlayedCards, state))
+            EnqueueMessage("8切り!");
+
+            if (IsFourStopWindowEligible(effectivePlayedCards))
             {
-                rule.Apply(effectivePlayedCards, state);
+                isFourStopWindowActive = true;
+                pendingEightCutCount = effectivePlayedCards.Count(c => c.Rank == 8);
+                pendingSkipCount = 0;
+                lastSkippedCount = 0;
+            }
+            else
+            {
+                yield return new WaitForSeconds(1.0f);
+                foreach (Transform child in tableArea) Destroy(child.gameObject);
+                lastPlayedCards.Clear();
+                passCount = 0;
+
+                pendingSkipCount = 0;
+                // 8切りでも一時的な革命状態をリセット
+                isTempRevolution = false;
+                isNineForceActive = false;
+                ResetBindState();
+
+                if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
+                {
+                    skipTurnAdvance = true;
+                }
             }
         }
 
-        // ★各ルールの処理を委譲
-        if (state.TriggerRevolution)
+        if (!state.IsElevenSilence)
         {
-            revolutionRule.ExecuteRevolution(this, ref isRevolution);
+            if (IsSixStopWindowEligible(effectivePlayedCards))
+            {
+                isSixStopWindowActive = true;
+                pendingTwoCount = effectivePlayedCards.Count(c => c.Rank == 15);
+            }
+            else
+            {
+                isSixStopWindowActive = false;
+                pendingTwoCount = 0;
+            }
         }
 
-        if (state.IsElevenBack)
-        {
-            elevenBackRule.ExecuteElevenBack(this, ref isTempRevolution);
-        }
 
-        if (state.SkipCount > 0)
+        if (state.SixTradeCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
-            pendingSkipCount = state.SkipCount;
-            fiveSkipRule.ExecuteFiveSkip(this, state.SkipCount);
-        }
+            EnqueueMessage("6トレード発動!");
+            yield return new WaitForSeconds(1.5f);
 
-        bool eightCutTriggered = state.IsEightCut;
+            Debug.Log($"6トレードシーケンス開始: {state.SixTradeCount}枚");
+            isSixTradeMode = true;
+            pendingTradeCardCount = state.SixTradeCount;
 
-        if (eightCutTriggered)
-        {
-            yield return StartCoroutine(eightCutRule.ExecuteEightCut(this, tableArea, currentPlayer));
+            StartCoroutine(HandleSixTradeSequence(currentPlayer));
             yield break;
         }
 
+        // ★修正: 7渡し処理
         if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
+            // まず発動メッセージを表示
+            EnqueueMessage("7渡し発動!");
+
+            // メッセージを読ませるために少し待機 (モード切替前)
+            yield return new WaitForSeconds(1.5f);
+
             Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
-            yield return new WaitForSeconds(1.0f);
-            yield return StartCoroutine(sevenPassRule.StartSevenPassSequence(this, currentPlayer, state.SevenPassCount));
-            // ★修正: 7渡しアクションが完了したので、DisplayPlayedCardsOnTableの残りの処理（EndTurnなど）をスキップする
-            yield break; //
+            isSevenPassMode = true; // ここでモードON
+            pendingActionCardCount = state.SevenPassCount;
+
+            // シーケンス開始
+            StartCoroutine(HandleSevenPassSequence(currentPlayer));
+            yield break;
         }
 
+        // ★修正: 10捨て処理
         if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
+            // まず発動メッセージを表示
+            EnqueueMessage("10捨て発動!");
+
+            // メッセージを読ませるために少し待機
+            yield return new WaitForSeconds(1.5f);
+
             Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
-            yield return new WaitForSeconds(1.0f);
-            yield return StartCoroutine(tenDiscardRule.StartTenDiscardSequence(this, currentPlayer, state.TenDiscardCount));
-            // ★修正: 10捨てアクションが完了したので、DisplayPlayedCardsOnTableの残りの処理（EndTurnなど）をスキップする
-            yield break; //
+            isTenDiscardMode = true; // ここでモードON
+            pendingActionCardCount = state.TenDiscardCount;
+
+            // シーケンス開始
+            StartCoroutine(HandleTenDiscardSequence(currentPlayer));
+            yield break;
         }
+
+        if (eightCutTriggered)
+        {
+            // skipTurnAdvance true なら EndTurn でループ
+        }
+
+        if (pendingSkipCount > 0)
+        {
+        }
+
+    }
+
+    private void RemovePlayedCardsFromUI(List<Card> played)
+    {
+        var cardViews = handAreaPlayer.GetComponentsInChildren<CardView>().ToList();
+
+        foreach (var cv in cardViews)
+            if (cv != null && cv.CardData != null && played.Contains(cv.CardData))
+                Destroy(cv.gameObject);
     }
 
     private void HandlePass()
     {
+        if (isNineForceActive && lastPlayedCards != null && lastPlayedCards.Count > 0)
+        {
+            var currentPlayer = players[currentTurnIndex];
+            if (HasValidPlayForNineForce(currentPlayer.Hand, lastPlayedCards))
+            {
+                EnqueueMessage("9フォース中は出せるカードがある限りパスできません。");
+                return;
+            }
+        }
+        if (isFourStopWindowActive)
+        {
+            isFourStopWindowActive = false;
+            pendingEightCutCount = 0;
+            StartCoroutine(ClearTableAndRestart());
+            return;
+        }
         passCount++;
 
-        if (passCount >= remainingPlayers.Count - 1)
+        // ★修正: 場を流す条件の計算
+        // 「まだあがっていない人数 - 1」から「スキップされた人数」を引く
+        // 例: 4人プレイで1人スキップされた場合、残り2人がパスすれば流れる (4 - 1 - 1 = 2回)
+        int requiredPasses = remainingPlayers.Count - 1 - lastSkippedCount;
+
+        // 安全策: マイナスにならないように補正
+        if (requiredPasses < 0) requiredPasses = 0;
+
+        Debug.Log($"Pass! passCount: {passCount}, required: {requiredPasses} (Skipped: {lastSkippedCount})");
+
+        if (passCount >= requiredPasses)
         {
             StartCoroutine(ClearTableAndRestart());
         }
@@ -1194,11 +1565,17 @@ public class GameManager : MonoBehaviour
 
         lastPlayedCards.Clear();
         passCount = 0;
+        lastSkippedCount = 0; // ★追加: リセット
 
         isTempRevolution = false;
-
+        isNineForceActive = false;
         pendingSkipCount = 0;
         skipTurnAdvance = false;
+        isFourStopWindowActive = false;
+        pendingEightCutCount = 0;
+        isSixStopWindowActive = false;
+        pendingTwoCount = 0;
+        ResetBindState();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
@@ -1206,10 +1583,11 @@ public class GameManager : MonoBehaviour
 
         if (remainingPlayers.Contains(lastPlayer))
         {
-            currentTurnIndex = lastPlayedPlayerIndex;
+            currentTurnIndex = lastPlayedPlayerIndex; // 最後にカードを出した人から
         }
         else
         {
+            // 最後にカードを出した人が既に上がっている場合、その次の人から
             int nextIdx = (lastPlayedPlayerIndex + 1) % players.Count;
             while (!remainingPlayers.Contains(players[nextIdx]))
             {
@@ -1271,7 +1649,7 @@ public class GameManager : MonoBehaviour
 
         while (messageQueue.Count > 0)
         {
-            if (isSevenPassMode || isTenDiscardMode)
+            if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
             {
                 yield return null;
                 continue;
@@ -1317,8 +1695,123 @@ public class GameManager : MonoBehaviour
         isShowingMessage = false;
     }
 
+    private bool IsEightCut(List<Card> played)
+    {
+        if (played == null || played.Count == 0) return false;
+        return played.Any(c => c.Rank == 8);
+    }
+    private bool IsFourStopWindowEligible(List<Card> effectivePlayed)
+    {
+        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
+        if (!effectivePlayed.All(c => c.Rank == 8)) return false;
+        return effectivePlayed.Count <= 2;
+    }
+
+    private bool IsSixStopWindowEligible(List<Card> effectivePlayed)
+    {
+        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
+        if (!effectivePlayed.All(c => c.Rank == 15)) return false;
+        return effectivePlayed.Count <= 2;
+    }
+
+    private int GetRequiredSixStopCount()
+    {
+        if (!isSixStopWindowActive) return 0;
+        return pendingTwoCount switch
+        {
+            1 => 2,
+            2 => 4,
+            _ => 0
+        };
+    }
+
+    private int GetRequiredFourStopCount()
+    {
+        if (!isFourStopWindowActive) return 0;
+        return pendingEightCutCount switch
+        {
+            1 => 2,
+            2 => 4,
+            _ => 0
+        };
+    }
+
+    private bool IsSixStopCandidate(List<Card> selected, int requiredCount)
+    {
+        if (requiredCount <= 0 || selected == null) return false;
+        if (selected.Count != requiredCount) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        if (realSelected.Any(c => c.Rank != 6)) return false;
+
+        return realSelected.Count + jokerCount == requiredCount;
+    }
+
+    private bool IsFourStopCandidate(List<Card> selected, int requiredCount)
+    {
+        if (requiredCount <= 0 || selected == null) return false;
+        if (selected.Count != requiredCount) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        if (realSelected.Any(c => c.Rank != 4)) return false;
+
+        return realSelected.Count + jokerCount == requiredCount;
+    }
+
+
+
+    private List<Card> GetFourStopCards(List<Card> hand, int requiredCount)
+    {
+        if (requiredCount <= 0) return new List<Card>();
+        if (hand == null || hand.Count == 0) return new List<Card>();
+
+        var fours = hand.Where(c => !c.IsJoker() && c.Rank == 4).ToList();
+        
+        var candidates = new List<Card>();
+        candidates.AddRange(fours);
+        if (!IsJokerStopActive)
+        {
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
+            if (joker != null) candidates.Add(joker);
+        }
+
+        if (candidates.Count < requiredCount) return new List<Card>();
+        return candidates.Take(requiredCount).ToList();
+    }
+    private List<Card> GetSixStopCards(List<Card> hand, int requiredCount)
+    {
+        if (requiredCount <= 0) return new List<Card>();
+        if (hand == null || hand.Count == 0) return new List<Card>();
+
+        var sixes = hand.Where(c => !c.IsJoker() && c.Rank == 6).ToList();
+        
+        var candidates = new List<Card>();
+        candidates.AddRange(sixes);
+        if (!IsJokerStopActive)
+        {
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
+            if (joker != null) candidates.Add(joker);
+        }
+
+        if (candidates.Count < requiredCount) return new List<Card>();
+        return candidates.Take(requiredCount).ToList();
+    }
     private List<Card> GetLegalCardsForUI(List<Card> hand, List<Card> field)
     {
+        if (IsJokerStopActive)
+        {
+            hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
+        if (isFourStopWindowActive)
+        {
+            return GetFourStopCards(hand, GetRequiredFourStopCount());
+        }
+        if (isSixStopWindowActive)
+        {
+            return GetSixStopCards(hand, GetRequiredSixStopCount());
+        }
         if (field == null || field.Count == 0)
         {
             return new List<Card>(hand);
@@ -1327,6 +1820,7 @@ public class GameManager : MonoBehaviour
         List<Card> playable = new List<Card>();
         int fieldCount = field.Count;
 
+        // ★UI用: ジョーカー単体の場合は最強(16)とする
         int fieldStrongestRank;
         if (field.Count == 1 && field[0].IsJoker())
         {
@@ -1339,25 +1833,42 @@ public class GameManager : MonoBehaviour
 
         int fieldStrength = GetCardStrength(fieldStrongestRank);
 
-        bool isFieldStair = IsStair(field);
+        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
+        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
+
 
         if (!isFieldStair)
         {
+            // ★スペード3のチェック
+            // 場がジョーカー単体なら、手札にスペード3があれば出す候補に入れる
             if (field.Count == 1 && field[0].IsJoker())
             {
                 var spade3 = hand.FirstOrDefault(c => c.Suit == Suit.Spade && c.Rank == 3);
-                if (spade3 != null) playable.Add(spade3);
+                if (spade3 != null && IsBindSatisfied(new List<Card> { spade3 }))
+                {
+                    playable.Add(spade3);
+                }
             }
 
             var groups = hand.GroupBy(c => c.Rank);
 
             foreach (var g in groups)
             {
+                // ★重要: スペード3が普通の3として出せるのは、場がジョーカーでない場合のみ。
+                // 既にジョーカー単体の場合は上のifブロックでスペード3のみがチェックされている。
+                // ここでは普通の3としての処理を継続。
                 if (g.Count() >= fieldCount)
                 {
                     if (GetCardStrength(g.Key) > fieldStrength)
                     {
-                        playable.AddRange(g);
+                        var candidate = g.ToList();
+                        foreach (var playableCard in GetPlayableCardsFromGroup(candidate, fieldCount))
+                        {
+                            if (!playable.Contains(playableCard))
+                            {
+                                playable.Add(playableCard);
+                            }
+                        }
                     }
                 }
             }
@@ -1373,12 +1884,48 @@ public class GameManager : MonoBehaviour
                 int seqStrongestRank = seq.Max(c => c.Rank);
                 if (GetCardStrength(seqStrongestRank) > fieldStrength)
                 {
-                    playable.AddRange(seq);
+                    if (IsBindSatisfied(seq))
+                    {
+                        playable.AddRange(seq);
+                    }
                 }
             }
         }
 
         return playable;
+    }
+
+    private IEnumerable<Card> GetPlayableCardsFromGroup(List<Card> groupCards, int requiredCount)
+    {
+        var playableCards = new HashSet<Card>();
+        if (groupCards == null || groupCards.Count < requiredCount) return playableCards;
+
+        var combo = new List<Card>(requiredCount);
+
+        void BuildCombination(int startIndex)
+        {
+            if (combo.Count == requiredCount)
+            {
+                if (IsBindSatisfied(combo))
+                {
+                    foreach (var card in combo)
+                    {
+                        playableCards.Add(card);
+                    }
+                }
+                return;
+            }
+
+            for (int i = startIndex; i < groupCards.Count; i++)
+            {
+                combo.Add(groupCards[i]);
+                BuildCombination(i + 1);
+                combo.RemoveAt(combo.Count - 1);
+            }
+        }
+
+        BuildCombination(0);
+        return playableCards;
     }
 
     private List<Card> GetEffectivePlayedCards(List<Card> original)
@@ -1452,10 +1999,812 @@ public class GameManager : MonoBehaviour
         return effectiveList;
     }
 
+    private void UpdateBindState(List<Card> previousField, List<Card> currentPlayed)
+    {
+        if (previousField == null || previousField.Count == 0) return;
+
+        var (prevReal, prevJokers) = GetRealCardsAndJokers(previousField);
+        var (currReal, currJokers) = GetRealCardsAndJokers(currentPlayed);
+
+        bool prevIsStair = IsStairWithJoker(prevReal, prevJokers);
+        bool currIsStair = IsStairWithJoker(currReal, currJokers);
+
+        var prevSuitSet = GetBindSuitSet(previousField, prevIsStair);
+        var currSuitSet = GetBindSuitSet(currentPlayed, currIsStair);
+
+        var intersection = new HashSet<Suit>(prevSuitSet);
+        intersection.IntersectWith(currSuitSet);
+
+        isSuitBindActive = intersection.Count > 0;
+        boundSuits = intersection;
+
+        if (prevIsStair || currIsStair)
+        {
+            isNumberBindActive = false;
+            expectedNextRank = -1;
+            UpdateSibariMessage();
+            return;
+        }
+
+        int prevRank = GetBindRank(previousField, prevIsStair);
+        int currRank = GetBindRank(currentPlayed, currIsStair);
+
+        int expectedRankFromPrev = GetNextSequentialRank(prevRank);
+        if (prevRank > 0 && currRank == expectedRankFromPrev)
+        {
+            isNumberBindActive = true;
+            expectedNextRank = GetNextSequentialRank(currRank);
+        }
+        else
+        {
+            isNumberBindActive = false;
+            expectedNextRank = -1;
+        }
+
+        UpdateSibariMessage();
+    }
+
+    private bool IsBindSatisfied(List<Card> selected)
+    {
+        if (!isNumberBindActive && !isSuitBindActive) return true;
+        if (selected == null || selected.Count == 0) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+        bool isStair = IsStairWithJoker(realSelected, jokerCount);
+
+        if (isNumberBindActive)
+        {
+            if (isStair) return false;
+            int selectedRank = GetBindRank(selected, isStair);
+            if (selectedRank <= 0 || expectedNextRank <= 0) return false;
+            if (selectedRank != expectedNextRank) return false;
+        }
+
+        if (isSuitBindActive)
+        {
+            var suitSet = GetBindSuitSet(selected, isStair);
+            if (suitSet.Count == 0) return false;
+            if (!suitSet.All(s => boundSuits.Contains(s))) return false;
+        }
+
+        return true;
+    }
+
+    private int GetBindRank(List<Card> cards, bool isStair)
+    {
+        var realCards = cards.Where(c => !c.IsJoker()).ToList();
+        if (realCards.Count == 0) return -1;
+
+        if (isStair)
+        {
+            var effective = GetEffectivePlayedCards(cards);
+            return effective.Max(c => c.Rank);
+        }
+
+        return realCards[0].Rank;
+    }
+
+    private HashSet<Suit> GetBindSuitSet(List<Card> cards, bool isStair)
+    {
+        var suits = new HashSet<Suit>();
+
+        if (isStair)
+        {
+            var real = cards.FirstOrDefault(c => !c.IsJoker());
+            if (real != null) suits.Add(real.Suit);
+            return suits;
+        }
+
+        foreach (var card in cards)
+        {
+            if (!card.IsJoker())
+            {
+                suits.Add(card.Suit);
+            }
+        }
+        return suits;
+    }
+
+    private int GetNextSequentialRank(int rank)
+    {
+        if (rank <= 0) return -1;
+
+        if (IsRevolutionActive)
+        {
+            return rank > 3 ? rank - 1 : -1;
+        }
+
+        return rank < 15 ? rank + 1 : -1;
+    }
+
+    private void ResetBindState()
+    {
+        isNumberBindActive = false;
+        isSuitBindActive = false;
+        expectedNextRank = -1;
+        boundSuits.Clear();
+        ClearSibariMessage();
+    }
+
+    private void ShowMessageText(TextMeshProUGUI target, string message)
+    {
+        if (target == null) return;
+        target.text = message;
+        target.gameObject.SetActive(true);
+        var cg = target.GetComponent<CanvasGroup>();
+        if (cg == null) cg = target.gameObject.AddComponent<CanvasGroup>();
+        cg.alpha = 1f;
+    }
+
+    private void HideMessageText(TextMeshProUGUI target)
+    {
+        if (target == null) return;
+        var cg = target.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = 0f;
+        target.gameObject.SetActive(false);
+        target.text = "";
+    }
+
+
+    private void UpdateSibariMessage()
+    {
+        var targetText = passMessageText != null ? passMessageText : SibariMessageText;
+        if (targetText == null) return;
+
+        if (!isNumberBindActive && !isSuitBindActive)
+        {
+            ClearSibariMessage();
+            return;
+        }
+
+        string suitMessage = "";
+        if (isSuitBindActive && boundSuits.Count > 0)
+        {
+            suitMessage = string.Join("・", boundSuits.Select(GetSuitLabel));
+        }
+
+        string numberMessage = "";
+        if (isNumberBindActive && expectedNextRank > 0)
+        {
+            numberMessage = GetRankLabel(expectedNextRank);
+        }
+
+        if (isNumberBindActive && isSuitBindActive)
+        {
+            targetText.text = $"激縛り発動次は {numberMessage} & {suitMessage}";
+        }
+        else if (isNumberBindActive)
+        {
+            targetText.text = $"数縛り発動次は {numberMessage} のみ";
+        }
+        else
+        {
+            targetText.text = $"スート縛り発動{suitMessage} のみ";
+        }
+
+        targetText.gameObject.SetActive(true);
+        var cg = targetText.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = 1f;
+    }
+
+    private void ClearSibariMessage()
+    {
+        var targetText = passMessageText != null ? passMessageText : SibariMessageText;
+        HideMessageText(targetText);
+    }
+
+    private string GetSuitLabel(Suit suit)
+    {
+        return suit switch
+        {
+            Suit.Spade => "♠",
+            Suit.Heart => "♥",
+            Suit.Diamond => "♦",
+            Suit.Club => "♣",
+            _ => suit.ToString()
+        };
+    }
+
+    private string GetRankLabel(int rank)
+    {
+        return rank switch
+        {
+            14 => "A",
+            15 => "2",
+            16 => "Joker",
+            _ => rank.ToString()
+        };
+    }
+
+
+    /// <summary>
+    /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします。
+    /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります。
+    /// </summary>
+    private void ClearPassMessage()
+    {
+        // メッセージのGameObjectを非アクティブにし、テキストをクリア
+        HideMessageText(passMessageText);
+
+        // Playボタンのテキストを「プレイ」に戻す（操作完了時にリセット）
+        if (playButton != null)
+        {
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "プレイ";
+        }
+    }
+
+    private IEnumerator HandleSixTradeSequence(PlayerBase player)
+    {
+        tradeSourcePlayer = player;
+        tradeTargetPlayer = null;
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count);
+
+        if (tradeSourcePlayer is HumanPlayer)
+        {
+            BeginTradeTargetSelection(tradeSourcePlayer);
+            yield break;
+        }
+
+        tradeTargetPlayer = ChooseTradeTargetForCpu(tradeSourcePlayer);
+        if (tradeTargetPlayer == null)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
+        if (pendingTradeCardCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        var sourceCards = SelectTradeCardsForCpu(tradeSourcePlayer, pendingTradeCardCount);
+        if (tradeTargetPlayer is HumanPlayer)
+        {
+            pendingTradeSourceCards = sourceCards;
+            BeginTradeCardSelection(tradeSourcePlayer, tradeTargetPlayer, false);
+            yield break;
+        }
+
+        var targetCards = SelectTradeCardsForCpu(tradeTargetPlayer, pendingTradeCardCount);
+        yield return StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, sourceCards, targetCards));
+    }
+
+    private void BeginTradeTargetSelection(PlayerBase sourcePlayer)
+    {
+        tradeTargetCandidates = GetTradeTargetCandidates(sourcePlayer);
+        if (tradeTargetCandidates.Count == 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            return;
+        }
+
+        tradeTargetIndex = 0;
+        isSelectingTradeTarget = true;
+
+        UpdateTradeTargetMessage();
+
+        if (playButton != null)
+        {
+            playButton.interactable = true;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "決定";
+        }
+        if (passButton != null)
+        {
+            passButton.gameObject.SetActive(true);
+            passButton.interactable = true;
+        }
+    }
+
+    private void CycleTradeTargetSelection()
+    {
+        if (!isSelectingTradeTarget || tradeTargetCandidates.Count == 0) return;
+
+        tradeTargetIndex = (tradeTargetIndex + 1) % tradeTargetCandidates.Count;
+        UpdateTradeTargetMessage();
+    }
+
+    private void ConfirmTradeTargetSelection()
+    {
+        if (!isSelectingTradeTarget || tradeTargetCandidates.Count == 0) return;
+
+        tradeTargetPlayer = tradeTargetCandidates[tradeTargetIndex];
+        isSelectingTradeTarget = false;
+
+        pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
+        if (pendingTradeCardCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            return;
+        }
+
+        BeginTradeCardSelection(tradeSourcePlayer, tradeTargetPlayer, true);
+    }
+
+    private void BeginTradeCardSelection(PlayerBase sourcePlayer, PlayerBase targetPlayer, bool selectingSourceCards)
+    {
+        tradeSourcePlayer = sourcePlayer;
+        tradeTargetPlayer = targetPlayer;
+        isSelectingTradeCards = true;
+        isSelectingTradeSourceCards = selectingSourceCards;
+
+        string message = selectingSourceCards
+            ? $"トレードに出すカードを\n<size=120%>{pendingTradeCardCount}枚</size>\n選んでください"
+            : $"トレードで渡すカードを\n<size=120%>{pendingTradeCardCount}枚</size>\n選んでください";
+
+        ShowMessageText(passMessageText, message);
+
+        ResetPlayerSelection();
+        CreatePlayerCardSlots(human.Hand.Count);
+        PopulatePlayerHand(human);
+
+        if (passButton != null) passButton.interactable = false;
+        if (playButton != null)
+        {
+            playButton.interactable = false;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "トレード";
+        }
+    }
+
+    private void HandleTradeCardSelection()
+    {
+        var selected = human.SelectCards(human.Hand);
+        int required = Mathf.Min(pendingTradeCardCount, human.Hand.Count);
+
+        if (selected.Count != required)
+        {
+            ShowMessageText(passMessageText, $"{required}枚 選んでください");
+            return;
+        }
+
+        if (playButton != null) playButton.interactable = false;
+
+        if (isSelectingTradeSourceCards)
+        {
+            pendingTradeSourceCards = selected;
+            var targetCards = SelectTradeCardsForCpu(tradeTargetPlayer, pendingTradeCardCount);
+            StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, pendingTradeSourceCards, targetCards));
+        }
+        else
+        {
+            var targetCards = selected;
+            StartCoroutine(ExecuteSixTrade(tradeSourcePlayer, tradeTargetPlayer, pendingTradeSourceCards, targetCards));
+        }
+    }
+
+    private IEnumerator ExecuteSixTrade(PlayerBase sourcePlayer, PlayerBase targetPlayer, List<Card> sourceCards, List<Card> targetCards)
+    {
+        int tradeCount = Mathf.Min(sourceCards.Count, targetCards.Count);
+        if (tradeCount <= 0)
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
+        Debug.Log($"{sourcePlayer.Name} と {targetPlayer.Name} が {tradeCount}枚 トレード");
+
+        foreach (var card in sourceCards.Take(tradeCount))
+        {
+            sourcePlayer.Hand.Remove(card);
+            targetPlayer.Hand.Add(card);
+
+            if (sourcePlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        foreach (var card in targetCards.Take(tradeCount))
+        {
+            targetPlayer.Hand.Remove(card);
+            sourcePlayer.Hand.Add(card);
+
+            if (targetPlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        if (sourcePlayer is HumanPlayer || targetPlayer is HumanPlayer)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+
+        if (sourcePlayer is not HumanPlayer)
+        {
+            Transform cpuArea = sourcePlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, sourcePlayer.Hand.Count);
+        }
+
+        if (targetPlayer is not HumanPlayer)
+        {
+            Transform cpuArea = targetPlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, targetPlayer.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        EndSixTradeMode();
+        EndTurn();
+    }
+
+    private void EndSixTradeMode()
+    {
+        isSixTradeMode = false;
+        isSelectingTradeTarget = false;
+        isSelectingTradeCards = false;
+        isSelectingTradeSourceCards = false;
+        pendingTradeCardCount = 0;
+        tradeTargetCandidates.Clear();
+        pendingTradeSourceCards.Clear();
+        tradeSourcePlayer = null;
+        tradeTargetPlayer = null;
+
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+
+        ResetPlayButtonUI();
+    }
+
+    private void UpdateTradeTargetMessage()
+    {
+        if (tradeTargetCandidates.Count == 0) return;
+        var target = tradeTargetCandidates[tradeTargetIndex];
+        string message = $"トレード相手: <size=120%>{target.Name}</size>\nパスで切替 / 出すで決定";
+        ShowMessageText(passMessageText, message);
+    }
+
+    private List<PlayerBase> GetTradeTargetCandidates(PlayerBase sourcePlayer)
+    {
+        return players.Where(p => p != sourcePlayer && remainingPlayers.Contains(p)).ToList();
+    }
+
+    private PlayerBase ChooseTradeTargetForCpu(PlayerBase sourcePlayer)
+    {
+        if (remainingPlayers.Contains(human) && sourcePlayer != human)
+        {
+            return human;
+        }
+
+        int startIndex = (players.IndexOf(sourcePlayer) + 1) % players.Count;
+        for (int i = 0; i < players.Count; i++)
+        {
+            int index = (startIndex + i) % players.Count;
+            var candidate = players[index];
+            if (candidate != sourcePlayer && remainingPlayers.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private List<Card> SelectTradeCardsForCpu(PlayerBase player, int count)
+    {
+        int tradeCount = Mathf.Min(count, player.Hand.Count);
+        return player.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).Take(tradeCount).ToList();
+    }
+
+    private IEnumerator HandleSevenPassSequence(PlayerBase player)
+    {
+        // ★修正: メッセージを具体的に
+        string message = $"渡すカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
+
+        if (player is HumanPlayer)
+        {
+            // ★常時表示用にテキストエリアを直接書き換え & 表示
+            ShowMessageText(passMessageText, message);
+
+            ResetPlayerSelection();
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+
+            if (passButton != null) passButton.interactable = false;
+            if (playButton != null)
+            {
+                playButton.interactable = false;
+                playButton.GetComponentInChildren<TextMeshProUGUI>().text = "あげる";
+            }
+            yield break;
+        }
+        else
+        {
+            // CPUの場合はエンキューで表示
+            EnqueueMessage($"CPUがカードを選んでいます...");
+            yield return new WaitForSeconds(1.0f);
+
+            var hand = player.Hand.OrderBy(c => c.Rank).ToList();
+            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            var cardsToPass = hand.Take(count).ToList();
+
+            yield return StartCoroutine(ExecuteSevenPassTransfer(player, cardsToPass));
+        }
+    }
+
+    private IEnumerator HandleTenDiscardSequence(PlayerBase player)
+    {
+        // ★修正: メッセージを具体的に
+        string message = $"捨てるカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
+
+        if (player is HumanPlayer)
+        {
+            // ★常時表示
+            ShowMessageText(passMessageText, message);
+
+            ResetPlayerSelection();
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+
+            if (passButton != null) passButton.interactable = false;
+            if (playButton != null)
+            {
+                playButton.interactable = false;
+                playButton.GetComponentInChildren<TextMeshProUGUI>().text = "捨てる";
+            }
+            yield break;
+        }
+        else
+        {
+            EnqueueMessage($"CPUが捨てるカードを選んでいます...");
+            yield return new WaitForSeconds(1.0f);
+
+            var hand = player.Hand.OrderBy(c => c.Rank).ToList();
+            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            var cardsToDiscard = hand.Take(count).ToList();
+
+            yield return StartCoroutine(ExecuteTenDiscardAction(player, cardsToDiscard));
+        }
+    }
+
+    public IEnumerator ExecuteSevenPassTransfer(PlayerBase fromPlayer, List<Card> cards)
+    {
+        // --- 修正箇所 開始 ---
+        // 単純な +1 ではなく、remainingPlayers に含まれているプレイヤーが見つかるまで探す
+        int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
+        PlayerBase toPlayer = players[nextIndex];
+
+        int safetyLoop = 0;
+        // ターゲットが「あがった人（remainingPlayersに含まれない人）」である間、次へ進める
+        while (!remainingPlayers.Contains(toPlayer))
+        {
+            nextIndex = (nextIndex + 1) % players.Count;
+            toPlayer = players[nextIndex];
+
+            // 無限ループ防止（念のため）
+            safetyLoop++;
+            if (safetyLoop > players.Count)
+            {
+                Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
+                break;
+            }
+        }
+        // --- 修正箇所 終了 ---
+
+        Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
+
+        foreach (var card in cards)
+        {
+            fromPlayer.Hand.Remove(card);
+            toPlayer.Hand.Add(card);
+
+            if (fromPlayer is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        if (toPlayer is HumanPlayer)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+        else
+        {
+            Transform cpuArea = null;
+            if (toPlayer == cpuPlayers[0]) cpuArea = handAreaCPU1;
+            else if (toPlayer == cpuPlayers[1]) cpuArea = handAreaCPU2;
+            else if (toPlayer == cpuPlayers[2]) cpuArea = handAreaCPU3;
+
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, toPlayer.Hand.Count);
+        }
+
+        if (fromPlayer is not HumanPlayer)
+        {
+            Transform cpuArea = fromPlayer.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, fromPlayer.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        if (forbidSpecialWin && fromPlayer.Hand.Count == 0)
+        {
+            EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています！");
+        }
+        else
+        {
+            CheckForWin(fromPlayer);
+            if (isGameOver) yield break;
+        }
+
+        isSevenPassMode = false;
+
+        passMessageText.gameObject.SetActive(false);
+        passMessageText.text = "";
+
+        ResetPlayButtonUI();
+
+        EndTurn();
+    }
+
+    public IEnumerator ExecuteTenDiscardAction(PlayerBase player, List<Card> cards)
+    {
+        Debug.Log($"{player.Name} は {cards.Count}枚 捨てました");
+
+        foreach (var card in cards)
+        {
+            player.Hand.Remove(card);
+            if (player is HumanPlayer)
+            {
+                RemovePlayedCardsFromUI(new List<Card> { card });
+            }
+        }
+
+        if (player is not HumanPlayer)
+        {
+            Transform cpuArea = player.handArea;
+            if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, player.Hand.Count);
+        }
+
+        yield return new WaitForSeconds(0.8f);
+
+        if (forbidSpecialWin && player.Hand.Count == 0)
+        {
+            EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています！");
+        }
+        else
+        {
+            CheckForWin(player);
+            if (isGameOver) yield break;
+        }
+
+        isTenDiscardMode = false;
+
+        passMessageText.gameObject.SetActive(false);
+        passMessageText.text = "";
+
+        ResetPlayButtonUI();
+
+        EndTurn();
+    }
+
+    private Card GetStrongestCard(PlayerBase player)
+    {
+        return player.Hand
+            .OrderByDescending(c => GetCardStrength(c.IsJoker() ? 16 : c.Rank))
+            .ThenByDescending(c => c.Rank)
+            .FirstOrDefault();
+    }
+
+    private void ApplyTwelvePenalty()
+    {
+        if (previousRoundRanks.Count == 0)
+        {
+            Debug.Log("12ペナルティ: 前回順位がないためスキップします。");
+            return;
+        }
+
+        var targets = previousRoundRanks
+            .Where(entry => entry.Value == 1 || entry.Value == 2)
+            .Select(entry => entry.Key)
+            .Where(player => remainingPlayers.Contains(player))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        EnqueueMessage("12ペナルティ発動! 前回1位・2位は最強カードを捨てます。");
+
+        foreach (var target in targets)
+        {
+            if (target.Hand.Count == 0) continue;
+
+            var strongestCard = GetStrongestCard(target);
+            if (strongestCard == null) continue;
+
+            target.Hand.Remove(strongestCard);
+
+            if (target is HumanPlayer)
+            {
+                CreatePlayerCardSlots(human.Hand.Count);
+                PopulatePlayerHand(human);
+            }
+            else
+            {
+                Transform cpuArea = target.handArea;
+                if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, target.Hand.Count);
+            }
+
+            EnqueueMessage($"{target.Name} は最強カードを捨てました。");
+
+            CheckForWin(target);
+            if (isGameOver) break;
+        }
+    }
+
+    private void ResetPlayButtonUI()
+    {
+        if (playButton != null)
+        {
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "出す";
+            playButton.interactable = false;
+        }
+        if (passButton != null) passButton.interactable = true;
+    }
+
+    private void CheckForWin(PlayerBase player)
+    {
+        if (player.Hand.Count == 0)
+        {
+            gameRanks[player] = currentRank;
+            EnqueueMessage($"{player.Name} があがりました! ({currentRank}位)");
+
+            currentRank++;
+            remainingPlayers.Remove(player);
+
+            if (remainingPlayers.Count <= 1)
+            {
+                var lastPlayer = remainingPlayers[0];
+                gameRanks[lastPlayer] = currentRank;
+                EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
+
+                isGameOver = true;
+                StartCoroutine(EndGameRoutine());
+            }
+        }
+    }
+    private string GetRankTitle(int rank)
+    {
+        return rank switch
+        {
+            1 => "大富豪",
+            2 => "富豪",
+            3 => "貧民",
+            4 => "大貧民",
+            _ => $"{rank}位"
+        };
+    }
+
+    private void SetPreviousRoundTitles()
+    {
+        previousRoundTitles.Clear();
+        foreach (var entry in previousRoundRanks)
+        {
+            previousRoundTitles[entry.Key] = GetRankTitle(entry.Value);
+        }
+    }
+
+
+
     private IEnumerator EndGameRoutine()
     {
         yield return new WaitForSeconds(2.0f);
         EnqueueMessage($"--- 第{currentGameCount}戦 終了 ---");
+
+        previousRoundRanks = new Dictionary<PlayerBase, int>(gameRanks);
+        SetPreviousRoundTitles();
 
         yield return new WaitForSeconds(3.0f);
 
@@ -1481,6 +2830,7 @@ public class GameManager : MonoBehaviour
         gameRanks.Clear();
         passCount = 0;
         lastPlayedCards.Clear();
+        ResetBindState();
 
         foreach (Transform child in tableArea) Destroy(child.gameObject);
 
@@ -1497,25 +2847,5 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(1.0f);
         StartTurn();
     }
-    /// <summary>
-    /// あがっていないプレイヤーのリストを取得します。
-    /// </summary>
-    public List<PlayerBase> GetRemainingPlayers()
-    {
-        return remainingPlayers;
-    }
-
-    /// <summary>
-    /// 現在のターンプレイヤーのインデックスを設定します。
-    /// </summary>
-    public void SetCurrentTurnIndex(int index)
-    {
-        // インデックスが有効な範囲内かチェックを入れるとより安全です
-        if (index >= 0 && index < players.Count)
-        {
-            currentTurnIndex = index;
-        }
-    }
-    
 
 }

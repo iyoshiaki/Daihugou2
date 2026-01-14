@@ -12,10 +12,17 @@ public class GameState
     public bool IsElevenBack { get; set; } = false;
     public int SkipCount { get; set; } = 0;
 
-    // š ’Ç‰Á: 8Ø‚èA7“n‚µA10Ì‚Ä‚Ìó‘Ô‚ğ’Ç‰Á
+    public bool TriggerGreatChaos { get; set; } = false;
     public bool IsEightCut { get; set; } = false;
     public int SevenPassCount { get; set; } = 0; // 0‚È‚ç”­“®‚È‚µ
     public int TenDiscardCount { get; set; } = 0; // 0‚È‚ç”­“®‚È‚µ
+    public int SixTradeCount { get; set; } = 0;
+    public bool IsElevenSilence { get; set; } = false;
+    public bool TriggerNineForce { get; set; } = false;
+    public bool TriggerTwelvePenalty { get; set; } = false;
+    public bool ForceSingleNextTurn { get; set; } = false;
+
+
 
     public GameState(List<Card> tableCards, int currentPlayerIndex)
     {
