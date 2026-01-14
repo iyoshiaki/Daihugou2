@@ -74,6 +74,8 @@ public class GameManager : MonoBehaviour
     private int pendingEightCutCount = 0;
     private int pendingTwoCount = 0;
 
+    private bool forceSingleNextTurn = false;
+    private bool isSingleOnlyTurn = false;
 
     // ★ 革命状態フラグ
     private bool isRevolution = false;
@@ -147,6 +149,9 @@ public class GameManager : MonoBehaviour
 
     private void StartTurn()
     {
+        isSingleOnlyTurn = forceSingleNextTurn;
+        forceSingleNextTurn = false;
+
         passButton.interactable = currentTurnIndex == 0;
 
         if (currentTurnIndex == 0)
@@ -333,6 +338,20 @@ public class GameManager : MonoBehaviour
             return GetSixStopCards(hand, GetRequiredSixStopCount());
         }
 
+        if (isSingleOnlyTurn)
+        {
+            if (field != null && field.Count > 0 && field.Count != 1)
+            {
+                return new List<Card>();
+            }
+
+            if (field == null || field.Count == 0)
+            {
+                var single = new List<Card> { hand.First() };
+                return IsBindSatisfied(single) ? single : new List<Card>();
+            }
+        }
+
 
         if (field == null || field.Count == 0)
         {
@@ -483,6 +502,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new RevolutionRule());
         rules.Add(new ElevenBackRule());
         rules.Add(new FiveSkipRule());
+        rules.Add(new FourSingleRule());
         rules.Add(new SixTradeRule());
         rules.Add(new SevenPassRule());
         rules.Add(new TenDiscardRule());
@@ -882,6 +902,11 @@ public class GameManager : MonoBehaviour
             return IsSixStopCandidate(selected, GetRequiredSixStopCount());
         }
 
+        if (isSingleOnlyTurn && selected.Count != 1)
+        {
+            return false;
+        }
+
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
 
         // --- 単体・役のチェック ---
@@ -1261,6 +1286,12 @@ public class GameManager : MonoBehaviour
             {
                 isElevenSilenceNextField = true;
             }
+        }
+
+        if (state.ForceSingleNextTurn)
+        {
+            forceSingleNextTurn = true;
+            EnqueueMessage("4シングル! 次のターンは1枚出しのみ。");
         }
 
         if (state.TriggerNineForce)

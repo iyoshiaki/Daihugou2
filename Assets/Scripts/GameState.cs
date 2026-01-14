@@ -20,6 +20,7 @@ public class GameState
     public bool IsElevenSilence { get; set; } = false;
     public bool TriggerNineForce { get; set; } = false;
     public bool TriggerTwelvePenalty { get; set; } = false;
+    public bool ForceSingleNextTurn { get; set; } = false;
 
 
 
