@@ -49,6 +49,7 @@ public class GameManager : MonoBehaviour
 
     [SerializeField] private Button passButton;
     [SerializeField] private Button playButton;
+    [SerializeField] private Button kirikaeButton;
 
     private List<PlayerBase> players;
 
@@ -144,6 +145,11 @@ public class GameManager : MonoBehaviour
     private List<PlayerBase> tradeTargetCandidates = new();
     private int tradeTargetIndex = 0;
     private List<Card> pendingTradeSourceCards = new();
+    private bool isFreezeTwelveMode = false;
+    private int pendingFreezeTwelveCount = 0;
+    private List<PlayerBase> freezeTargetCandidates = new();
+    private int freezeTargetIndex = 0;
+    private Dictionary<PlayerBase, int> freezePassCounts = new();
 
 
     // ================================================
@@ -152,6 +158,13 @@ public class GameManager : MonoBehaviour
 
     private void StartTurn()
     {
+        PlayerBase currentPlayer = players[currentTurnIndex];
+        if (IsFreezePassActive(currentPlayer))
+        {
+            StartCoroutine(HandleFreezePassTurn(currentPlayer));
+            return;
+        }
+
         isSingleOnlyTurn = forceSingleNextTurn;
         forceSingleNextTurn = false;
 
@@ -308,7 +321,7 @@ public class GameManager : MonoBehaviour
         yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
 
         // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
-        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
         {
             yield break;
         }
@@ -524,9 +537,20 @@ public class GameManager : MonoBehaviour
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
 
-        StartTurn();
-
         passButton.onClick.AddListener(OnPassButton);
+        if (kirikaeButton == null)
+        {
+            var kirikaeObj = GameObject.Find("KirikaeButton");
+            if (kirikaeObj != null)
+            {
+                kirikaeButton = kirikaeObj.GetComponent<Button>();
+            }
+        }
+        if (kirikaeButton != null)
+        {
+            kirikaeButton.onClick.AddListener(OnKirikaeButton);
+            kirikaeButton.gameObject.SetActive(false);
+        }
 
         players = new List<PlayerBase> { humanPlayer };
         players.AddRange(cpuPlayers);
@@ -545,7 +569,10 @@ public class GameManager : MonoBehaviour
         rules.Add(new TenDiscardRule());
         rules.Add(new GreatChaosRule());
         rules.Add(new NineForceRule());
+        rules.Add(new FreezeTwelveRule());
         rules.Add(new TwelvePenaltyRule());
+
+        StartTurn();
     }
     void Update()
     {
@@ -557,10 +584,11 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
-        if (!isPlayerTurn && !IsTradeSelectionActive())
+        if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive())
         {
             if (playButton != null) playButton.gameObject.SetActive(false);
             if (passButton != null) passButton.gameObject.SetActive(false);
+            if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
             return;
         }
 
@@ -575,6 +603,19 @@ public class GameManager : MonoBehaviour
                 {
                     passButton.gameObject.SetActive(true);
                     passButton.interactable = true;
+                }
+                if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+                return;
+            }
+
+            if (isFreezeTwelveMode)
+            {
+                playButton.interactable = true;
+                if (passButton != null) passButton.gameObject.SetActive(false);
+                if (kirikaeButton != null)
+                {
+                    kirikaeButton.gameObject.SetActive(true);
+                    kirikaeButton.interactable = true;
                 }
                 return;
             }
@@ -594,6 +635,7 @@ public class GameManager : MonoBehaviour
                     playButton.interactable = (selectedCount == required);
                 }
                 if (passButton != null) passButton.gameObject.SetActive(false);
+                if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
                 return;
             }
 
@@ -625,6 +667,7 @@ public class GameManager : MonoBehaviour
                     passButton.interactable = canPass;
                 }
             }
+            if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
         }
     }
 
@@ -644,6 +687,11 @@ public class GameManager : MonoBehaviour
     private bool IsTradeSelectionActive()
     {
         return isSelectingTradeTarget || isSelectingTradeCards;
+    }
+
+    private bool IsFreezeSelectionActive()
+    {
+        return isFreezeTwelveMode;
     }
 
     private void CreatePlayerCardSlots(int slotCount)
@@ -834,7 +882,7 @@ public class GameManager : MonoBehaviour
 
         // 7渡しや10捨てが開始された場合、DisplayPlayedCardsOnTableの中で処理が分岐するため、
         // ここには到達しないはずだが、念のためガード。
-        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
+        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
         {
             yield break;
         }
@@ -864,6 +912,11 @@ public class GameManager : MonoBehaviour
         if (isSelectingTradeCards)
         {
             HandleTradeCardSelection();
+            return;
+        }
+        if (isFreezeTwelveMode)
+        {
+            ConfirmFreezeTargetSelection();
             return;
         }
         if (!isPlayerTurn) return;
@@ -979,7 +1032,7 @@ public class GameManager : MonoBehaviour
             // 場がジョーカー1枚の場合のみ
             if (field.Count == 1 && field[0].IsJoker())
             {
-                // 自分が出すのが「スペード」かつ「Rank3」かつ「1枚」ならOK
+                // 自分が出のが「スペード」かつ「Rank3」かつ「1枚」ならOK
                 if (selected.Count == 1 && selected[0].Suit == Suit.Spade && selected[0].Rank == 3)
                 {
                     isSpade3Counter = true;
@@ -1142,6 +1195,14 @@ public class GameManager : MonoBehaviour
         }
         if (players[currentTurnIndex] != humanPlayer) return;
         HandlePass();
+    }
+
+    private void OnKirikaeButton()
+    {
+        if (isFreezeTwelveMode)
+        {
+            CycleFreezeTargetSelection();
+        }
     }
 
     private IEnumerator DisplayPlayedCardsOnTable(PlayerBase currentPlayer, List<Card> played)
@@ -1373,6 +1434,22 @@ public class GameManager : MonoBehaviour
             ApplyTwelvePenalty();
             if (isGameOver) yield break;
         }
+        if (state.FreezeTwelveCount > 0 && remainingPlayers.Contains(currentPlayer))
+        {
+            if (state.FreezeTwelveCount >= 4)
+            {
+                ApplyFreezeTwelveToAll(currentPlayer);
+            }
+            else if (currentPlayer is HumanPlayer)
+            {
+                BeginFreezeTargetSelection(currentPlayer, state.FreezeTwelveCount);
+                yield break;
+            }
+            else
+            {
+                ApplyFreezeTwelveForCpu(currentPlayer, state.FreezeTwelveCount);
+            }
+        }
 
         pendingSkipCount = state.SkipCount;
         lastSkippedCount = state.SkipCount;
@@ -1557,6 +1634,71 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private bool IsFreezePassActive(PlayerBase player)
+    {
+        return freezePassCounts.TryGetValue(player, out int count) && count > 0;
+    }
+
+    private void ConsumeFreezePass(PlayerBase player)
+    {
+        if (!freezePassCounts.TryGetValue(player, out int count)) return;
+        count--;
+        if (count <= 0)
+        {
+            freezePassCounts.Remove(player);
+        }
+        else
+        {
+            freezePassCounts[player] = count;
+        }
+    }
+
+    private IEnumerator HandleFreezePassTurn(PlayerBase player)
+    {
+        isPlayerTurn = false;
+        ConsumeFreezePass(player);
+
+        if (playButton != null) playButton.gameObject.SetActive(false);
+        if (passButton != null) passButton.gameObject.SetActive(false);
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+
+        EnqueueMessage($"フリーズ THE 12: {player.Name} はパス!");
+        yield return new WaitForSeconds(0.8f);
+
+        HandleForcedPass();
+    }
+
+    private void HandleForcedPass()
+    {
+        if (lastPlayedCards == null || lastPlayedCards.Count == 0)
+        {
+            EndTurn();
+            return;
+        }
+
+        if (isFourStopWindowActive)
+        {
+            isFourStopWindowActive = false;
+            pendingEightCutCount = 0;
+            StartCoroutine(ClearTableAndRestart());
+            return;
+        }
+
+        passCount++;
+
+        int requiredPasses = remainingPlayers.Count - 1 - lastSkippedCount;
+        if (requiredPasses < 0) requiredPasses = 0;
+
+        if (passCount >= requiredPasses)
+        {
+            StartCoroutine(ClearTableAndRestart());
+        }
+        else
+        {
+            EndTurn();
+        }
+    }
+
     private IEnumerator ClearTableAndRestart()
     {
         yield return new WaitForSeconds(0.6f);
@@ -1649,7 +1791,7 @@ public class GameManager : MonoBehaviour
 
         while (messageQueue.Count > 0)
         {
-            if (isSevenPassMode || isTenDiscardMode || isSixTradeMode)
+            if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
             {
                 yield return null;
                 continue;
@@ -1768,7 +1910,7 @@ public class GameManager : MonoBehaviour
         if (hand == null || hand.Count == 0) return new List<Card>();
 
         var fours = hand.Where(c => !c.IsJoker() && c.Rank == 4).ToList();
-        
+
         var candidates = new List<Card>();
         candidates.AddRange(fours);
         if (!IsJokerStopActive)
@@ -1786,7 +1928,7 @@ public class GameManager : MonoBehaviour
         if (hand == null || hand.Count == 0) return new List<Card>();
 
         var sixes = hand.Where(c => !c.IsJoker() && c.Rank == 6).ToList();
-        
+
         var candidates = new List<Card>();
         candidates.AddRange(sixes);
         if (!IsJokerStopActive)
@@ -2496,6 +2638,123 @@ public class GameManager : MonoBehaviour
         return player.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).Take(tradeCount).ToList();
     }
 
+    private void BeginFreezeTargetSelection(PlayerBase sourcePlayer, int count)
+    {
+        freezeTargetCandidates = GetFreezeTargetCandidates(sourcePlayer);
+        if (freezeTargetCandidates.Count == 0)
+        {
+            EndFreezeTwelveMode();
+            EndTurn();
+            return;
+        }
+
+        pendingFreezeTwelveCount = count;
+        freezeTargetIndex = 0;
+        isFreezeTwelveMode = true;
+
+        UpdateFreezeTargetMessage();
+
+        if (playButton != null)
+        {
+            playButton.interactable = true;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "決定";
+        }
+        if (passButton != null) passButton.gameObject.SetActive(false);
+        if (kirikaeButton != null)
+        {
+            kirikaeButton.gameObject.SetActive(true);
+            kirikaeButton.interactable = true;
+        }
+    }
+
+    private void CycleFreezeTargetSelection()
+    {
+        if (!isFreezeTwelveMode || freezeTargetCandidates.Count == 0) return;
+        freezeTargetIndex = (freezeTargetIndex + 1) % freezeTargetCandidates.Count;
+        UpdateFreezeTargetMessage();
+    }
+
+    private void ConfirmFreezeTargetSelection()
+    {
+        if (!isFreezeTwelveMode || freezeTargetCandidates.Count == 0) return;
+
+        var target = freezeTargetCandidates[freezeTargetIndex];
+        AddFreezePass(target, 1);
+        pendingFreezeTwelveCount--;
+
+        if (pendingFreezeTwelveCount <= 0)
+        {
+            EndFreezeTwelveMode();
+            EndTurn();
+            return;
+        }
+
+        UpdateFreezeTargetMessage();
+    }
+
+    private void EndFreezeTwelveMode()
+    {
+        isFreezeTwelveMode = false;
+        pendingFreezeTwelveCount = 0;
+        freezeTargetCandidates.Clear();
+        freezeTargetIndex = 0;
+
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+        ResetPlayButtonUI();
+    }
+
+    private void UpdateFreezeTargetMessage()
+    {
+        if (freezeTargetCandidates.Count == 0) return;
+        var target = freezeTargetCandidates[freezeTargetIndex];
+        string message = $"フリーズ THE 12 対象: <size=120%>{target.Name}</size>\n残り{pendingFreezeTwelveCount}人\n切替ボタンで変更 / 出すで決定";
+        ShowMessageText(passMessageText, message);
+    }
+
+    private List<PlayerBase> GetFreezeTargetCandidates(PlayerBase sourcePlayer)
+    {
+        return remainingPlayers.Where(p => p != sourcePlayer).ToList();
+    }
+
+    private void ApplyFreezeTwelveToAll(PlayerBase sourcePlayer)
+    {
+        var targets = GetFreezeTargetCandidates(sourcePlayer);
+        foreach (var target in targets)
+        {
+            AddFreezePass(target, 1);
+        }
+        EnqueueMessage("フリーズ THE 12: 全員パス!");
+    }
+
+    private void ApplyFreezeTwelveForCpu(PlayerBase sourcePlayer, int count)
+    {
+        var targets = GetFreezeTargetCandidates(sourcePlayer);
+        if (targets.Count == 0) return;
+
+        for (int i = 0; i < count; i++)
+        {
+            var target = targets[i % targets.Count];
+            AddFreezePass(target, 1);
+        }
+        EnqueueMessage($"フリーズ THE 12: {count}人をパス状態にしました。");
+    }
+
+    private void AddFreezePass(PlayerBase target, int count)
+    {
+        if (!freezePassCounts.ContainsKey(target))
+        {
+            freezePassCounts[target] = 0;
+        }
+        freezePassCounts[target] += count;
+        EnqueueMessage($"{target.Name} はフリーズでパスになります。");
+    }
+
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
         // ★修正: メッセージを具体的に
@@ -2752,6 +3011,7 @@ public class GameManager : MonoBehaviour
             playButton.interactable = false;
         }
         if (passButton != null) passButton.interactable = true;
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
     }
 
     private void CheckForWin(PlayerBase player)
@@ -2763,6 +3023,7 @@ public class GameManager : MonoBehaviour
 
             currentRank++;
             remainingPlayers.Remove(player);
+            freezePassCounts.Remove(player);
 
             if (remainingPlayers.Count <= 1)
             {

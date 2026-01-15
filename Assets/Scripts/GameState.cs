@@ -21,7 +21,7 @@ public class GameState
     public bool TriggerNineForce { get; set; } = false;
     public bool TriggerTwelvePenalty { get; set; } = false;
     public bool ForceSingleNextTurn { get; set; } = false;
-
+    public int FreezeTwelveCount { get; set; } = 0;
 
 
     public GameState(List<Card> tableCards, int currentPlayerIndex)
