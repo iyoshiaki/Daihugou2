@@ -611,12 +611,12 @@ public class GameManager : MonoBehaviour
             if (isFreezeTwelveMode)
             {
                 playButton.interactable = true;
-                if (passButton != null) passButton.gameObject.SetActive(false);
-                if (kirikaeButton != null)
+                if (passButton != null)
                 {
-                    kirikaeButton.gameObject.SetActive(true);
-                    kirikaeButton.interactable = true;
+                    passButton.gameObject.SetActive(true);
+                    passButton.interactable = true;
                 }
+                if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
                 return;
             }
 
@@ -1191,6 +1191,11 @@ public class GameManager : MonoBehaviour
         if (isSelectingTradeTarget)
         {
             CycleTradeTargetSelection();
+            return;
+        }
+        if (isFreezeTwelveMode)
+        {
+            CycleFreezeTargetSelection();
             return;
         }
         if (players[currentTurnIndex] != humanPlayer) return;
@@ -2659,12 +2664,12 @@ public class GameManager : MonoBehaviour
             playButton.interactable = true;
             playButton.GetComponentInChildren<TextMeshProUGUI>().text = "決定";
         }
-        if (passButton != null) passButton.gameObject.SetActive(false);
-        if (kirikaeButton != null)
+        if (passButton != null)
         {
-            kirikaeButton.gameObject.SetActive(true);
-            kirikaeButton.interactable = true;
+            passButton.gameObject.SetActive(true);
+            passButton.interactable = true;
         }
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
     }
 
     private void CycleFreezeTargetSelection()
@@ -2713,7 +2718,7 @@ public class GameManager : MonoBehaviour
     {
         if (freezeTargetCandidates.Count == 0) return;
         var target = freezeTargetCandidates[freezeTargetIndex];
-        string message = $"フリーズ THE 12 対象: <size=120%>{target.Name}</size>\n残り{pendingFreezeTwelveCount}人\n切替ボタンで変更 / 出すで決定";
+        string message = $"フリーズ THE 12 対象: <size=120%>{target.Name}</size>\n残り{pendingFreezeTwelveCount}人\nパスで切替 / 出すで決定";
         ShowMessageText(passMessageText, message);
     }
 
