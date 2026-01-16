@@ -1532,9 +1532,6 @@ public class GameManager : MonoBehaviour
 
         if (state.SixTradeCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
-            EnqueueMessage("6トレード発動!");
-            yield return new WaitForSeconds(1.5f);
-
             Debug.Log($"6トレードシーケンス開始: {state.SixTradeCount}枚");
             isSixTradeMode = true;
             pendingTradeCardCount = state.SixTradeCount;
@@ -2445,6 +2442,8 @@ public class GameManager : MonoBehaviour
             passButton.gameObject.SetActive(true);
             passButton.interactable = true;
         }
+        SetPassButtonLabel("切替");
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
     }
 
     private void CycleTradeTargetSelection()
