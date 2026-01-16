@@ -2669,6 +2669,7 @@ public class GameManager : MonoBehaviour
             passButton.gameObject.SetActive(true);
             passButton.interactable = true;
         }
+        SetPassButtonLabel("切替");
         if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
     }
 
@@ -3016,7 +3017,18 @@ public class GameManager : MonoBehaviour
             playButton.interactable = false;
         }
         if (passButton != null) passButton.interactable = true;
+        SetPassButtonLabel("パス");
         if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+    }
+
+    private void SetPassButtonLabel(string label)
+    {
+        if (passButton == null) return;
+        var text = passButton.GetComponentInChildren<TextMeshProUGUI>();
+        if (text != null)
+        {
+            text.text = label;
+        }
     }
 
     private void CheckForWin(PlayerBase player)
