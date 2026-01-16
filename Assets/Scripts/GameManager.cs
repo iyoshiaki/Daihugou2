@@ -150,6 +150,8 @@ public class GameManager : MonoBehaviour
     private List<PlayerBase> freezeTargetCandidates = new();
     private int freezeTargetIndex = 0;
     private Dictionary<PlayerBase, int> freezePassCounts = new();
+    private Dictionary<PlayerBase, int> barrierCounts = new();
+
 
 
     // ================================================
@@ -218,15 +220,15 @@ public class GameManager : MonoBehaviour
 
         // --- 2. 通常のターン進行 ---
 
-        int nextTurnIndex = (currentTurnIndex + 1 + pendingSkipCount) % players.Count;
+        int nextTurnIndex = currentTurnIndex;
+        int skipCount = pendingSkipCount;
 
         pendingSkipCount = 0; // スキップ数をリセット
 
         // --- 3. あがったプレイヤー（remainingPlayersにいない人）をスキップする ---
         int loopSafety = 0;
 
-        // 次の候補者が「あがった人」である間、インデックスを進め続ける
-        while (!remainingPlayers.Contains(players[nextTurnIndex]))
+        while (true)
         {
             nextTurnIndex = (nextTurnIndex + 1) % players.Count;
 
@@ -238,6 +240,31 @@ public class GameManager : MonoBehaviour
                 StartCoroutine(EndGameRoutine());
                 return;
             }
+            if (!remainingPlayers.Contains(players[nextTurnIndex]))
+            {
+                continue;
+            }
+
+            if (skipCount > 0)
+            {
+                var candidate = players[nextTurnIndex];
+                if (TryConsumeBarrier(candidate, "5飛ばし"))
+                {
+                    skipCount--;
+                    lastSkippedCount = Mathf.Max(0, lastSkippedCount - 1);
+                    break;
+                }
+
+                skipCount--;
+                if (skipCount > 0)
+                {
+                    continue;
+                }
+
+                continue;
+            }
+
+            break;
         }
 
         // --- 4. プレイヤー確定 ---
@@ -569,6 +596,7 @@ public class GameManager : MonoBehaviour
         rules.Add(new TenDiscardRule());
         rules.Add(new GreatChaosRule());
         rules.Add(new NineForceRule());
+        rules.Add(new BarrierRule());
         rules.Add(new FreezeTwelveRule());
         rules.Add(new TwelvePenaltyRule());
 
@@ -1343,7 +1371,7 @@ public class GameManager : MonoBehaviour
 
         if (isSpade3Counter)
         {
-            EnqueueMessage("スペード3返し！場が流れます。");
+            EnqueueMessage("スペード3返し!場が流れます。");
             // ★修正: 強制流しの前に一時的な革命状態をリセット
             isTempRevolution = false;
 
@@ -1412,6 +1440,11 @@ public class GameManager : MonoBehaviour
         {
             isNineForceActive = true;
             EnqueueMessage("9フォース発動!");
+        }
+
+        if (state.TriggerBarrier)
+        {
+            ActivateBarrier(currentPlayer);
         }
 
         if (state.TriggerRevolution)
@@ -1653,6 +1686,33 @@ public class GameManager : MonoBehaviour
         {
             freezePassCounts[player] = count;
         }
+    }
+
+    private void ActivateBarrier(PlayerBase player)
+    {
+        barrierCounts[player] = 1;
+        EnqueueMessage($"{player.Name} はバリアを獲得!");
+    }
+
+    private bool TryConsumeBarrier(PlayerBase player, string effectName)
+    {
+        if (!barrierCounts.TryGetValue(player, out int count) || count <= 0)
+        {
+            return false;
+        }
+
+        count--;
+        if (count <= 0)
+        {
+            barrierCounts.Remove(player);
+        }
+        else
+        {
+            barrierCounts[player] = count;
+        }
+
+        EnqueueMessage($"{player.Name} のバリアで{effectName}を無効化!");
+        return true;
     }
 
     private IEnumerator HandleFreezePassTurn(PlayerBase player)
@@ -2525,6 +2585,13 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator ExecuteSixTrade(PlayerBase sourcePlayer, PlayerBase targetPlayer, List<Card> sourceCards, List<Card> targetCards)
     {
+        if (TryConsumeBarrier(targetPlayer, "6トレード"))
+        {
+            EndSixTradeMode();
+            EndTurn();
+            yield break;
+        }
+
         int tradeCount = Mathf.Min(sourceCards.Count, targetCards.Count);
         if (tradeCount <= 0)
         {
@@ -2752,6 +2819,10 @@ public class GameManager : MonoBehaviour
 
     private void AddFreezePass(PlayerBase target, int count)
     {
+        if (TryConsumeBarrier(target, "フリーズ12"))
+        {
+            return;
+        }
         if (!freezePassCounts.ContainsKey(target))
         {
             freezePassCounts[target] = 0;
@@ -2857,6 +2928,19 @@ public class GameManager : MonoBehaviour
 
         Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
 
+        if (TryConsumeBarrier(toPlayer, "7渡し"))
+        {
+            isSevenPassMode = false;
+            if (passMessageText != null)
+            {
+                passMessageText.gameObject.SetActive(false);
+                passMessageText.text = "";
+            }
+            ResetPlayButtonUI();
+            EndTurn();
+            yield break;
+        }
+
         foreach (var card in cards)
         {
             fromPlayer.Hand.Remove(card);
@@ -2893,7 +2977,7 @@ public class GameManager : MonoBehaviour
 
         if (forbidSpecialWin && fromPlayer.Hand.Count == 0)
         {
-            EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています！");
+            EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています!");
         }
         else
         {
@@ -2934,7 +3018,7 @@ public class GameManager : MonoBehaviour
 
         if (forbidSpecialWin && player.Hand.Count == 0)
         {
-            EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています！");
+            EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています!");
         }
         else
         {
@@ -2984,6 +3068,7 @@ public class GameManager : MonoBehaviour
         foreach (var target in targets)
         {
             if (target.Hand.Count == 0) continue;
+            if (TryConsumeBarrier(target, "12ペナルティ")) continue;
 
             var strongestCard = GetStrongestCard(target);
             if (strongestCard == null) continue;
@@ -3094,7 +3179,7 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            EnqueueMessage("全4戦終了！お疲れ様でした！");
+            EnqueueMessage("全4戦終了!お疲れ様でした!");
         }
     }
 
