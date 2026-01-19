@@ -86,6 +86,11 @@ public class GameManager : MonoBehaviour
     private bool isElevenSilenceNextField = false;
     private bool isNineForceActive = false;
 
+    private bool isCpuTurnInProgress = false;
+    private bool isPlayerActionLocked = false;
+    private Coroutine actionLockCoroutine = null;
+    private const float ActionLockSeconds = 0.2f;
+    private bool suppressPassAfterPlay = false;
     // 現在の「強さ」計算プロパティ
     // 革命中または11バック中なら、強さが逆になる
     private bool IsRevolutionActive => isRevolution ^ isTempRevolution; // XOR: どっちか片方なら革命、両方なら通常
@@ -170,6 +175,8 @@ public class GameManager : MonoBehaviour
     private void StartTurn()
     {
         PlayerBase currentPlayer = players[currentTurnIndex];
+        isPlayerActionLocked = false;
+        suppressPassAfterPlay = false;
         if (IsFreezePassActive(currentPlayer))
         {
             StartCoroutine(HandleFreezePassTurn(currentPlayer));
@@ -195,6 +202,7 @@ public class GameManager : MonoBehaviour
 
         if (currentTurnIndex == 0)
         {
+            isCpuTurnInProgress = false;
             if (playButton != null) playButton.interactable = true;
 
             ResetPlayerSelection();
@@ -208,6 +216,12 @@ public class GameManager : MonoBehaviour
             if (playButton != null) playButton.interactable = false;
 
             isPlayerTurn = false;
+            SetActionButtonsActive(false);
+            if (isCpuTurnInProgress)
+            {
+                return;
+            }
+            isCpuTurnInProgress = true;
             StartCoroutine(CpuPlayTurn(currentTurnIndex - 1));
         }
     }
@@ -339,58 +353,65 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator CpuPlayTurn(int cpuIndex)
     {
-        var cpu = cpuPlayers[cpuIndex];
-        yield return new WaitForSeconds(0.8f);
-
-        if (cpu.Hand.Count == 0)
+        try
         {
-            EndTurn();
-            yield break;
-        }
-
-        List<Card> playableCards = GetPlayableCardsForCpu(cpu, lastPlayedCards);
-
-        if (playableCards.Count == 0)
-        {
-            EnqueueMessage($"{cpu.Name} はパスしました");
-            Debug.Log($"{cpu.Name} はパスしました。");
+            var cpu = cpuPlayers[cpuIndex];
             yield return new WaitForSeconds(0.8f);
-            HandlePass();
-            yield break;
+
+            if (cpu.Hand.Count == 0)
+            {
+                EndTurn();
+                yield break;
+            }
+
+            List<Card> playableCards = GetPlayableCardsForCpu(cpu, lastPlayedCards);
+
+            if (playableCards.Count == 0)
+            {
+                EnqueueMessage($"{cpu.Name} はパスしました");
+                Debug.Log($"{cpu.Name} はパスしました。");
+                yield return new WaitForSeconds(0.8f);
+                HandlePass();
+                yield break;
+            }
+
+            foreach (var c in playableCards) cpu.Hand.Remove(c);
+
+            yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
+
+            // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
+            if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
+            {
+                yield break;
+            }
+
+            if (isSelectingSuitLock)
+            {
+                yield break;
+            }
+
+            // ★追加修正: スペード3返しなどで場が流れた場合（lastPlayedCards.Count == 0）、
+            // ClearTableAndRestart() の中で既に StartTurn() が呼ばれているため、
+            // ここで EndTurn() を呼ぶとターンが二重に進んでしまい、次のプレイヤーがスキップされます。
+
+            // 8切りは lastPlayedCards.Count == 0 かつ skipTurnAdvance が true に設定され、EndTurn() に到達させる必要があります。
+            // それ以外の場で流れたケース（スペード3返し、全員パス後のClearTableAndRestart）は StartTurn() が呼ばれているため、ここで終了させます。
+            bool clearedBySpade3OrPass = lastPlayedCards.Count == 0 && !skipTurnAdvance;
+
+            if (clearedBySpade3OrPass)
+            {
+                // ClearTableAndRestart() が StartTurn() を呼び、次のプレイヤーにターンが移っているため、
+                // ここで EndTurn() を呼ぶと二重にターンが進んでしまうのを防ぐため break します。
+                yield break;
+            }
+
+            yield return new WaitForSeconds(0.8f);
+            EndTurn();
         }
-
-        foreach (var c in playableCards) cpu.Hand.Remove(c);
-
-        yield return StartCoroutine(DisplayPlayedCardsOnTable(cpu, playableCards));
-
-        // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
-        if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
+        finally
         {
-            yield break;
+            isCpuTurnInProgress = false;
         }
-
-        if (isSelectingSuitLock)
-        {
-            yield break;
-        }
-
-        // ★追加修正: スペード3返しなどで場が流れた場合（lastPlayedCards.Count == 0）、
-        // ClearTableAndRestart() の中で既に StartTurn() が呼ばれているため、
-        // ここで EndTurn() を呼ぶとターンが二重に進んでしまい、次のプレイヤーがスキップされます。
-
-        // 8切りは lastPlayedCards.Count == 0 かつ skipTurnAdvance が true に設定され、EndTurn() に到達させる必要があります。
-        // それ以外の場で流れたケース（スペード3返し、全員パス後のClearTableAndRestart）は StartTurn() が呼ばれているため、ここで終了させます。
-        bool clearedBySpade3OrPass = lastPlayedCards.Count == 0 && !skipTurnAdvance;
-
-        if (clearedBySpade3OrPass)
-        {
-            // ClearTableAndRestart() が StartTurn() を呼び、次のプレイヤーにターンが移っているため、
-            // ここで EndTurn() を呼ぶと二重にターンが進んでしまうのを防ぐため break します。
-            yield break;
-        }
-
-        yield return new WaitForSeconds(0.8f);
-        EndTurn();
     }
 
     // ================================================
@@ -633,11 +654,14 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
+        if (isCpuTurnInProgress && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive())
+        {
+            SetActionButtonsActive(false);
+            return;
+        }
         if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive())
         {
-            if (playButton != null) playButton.gameObject.SetActive(false);
-            if (passButton != null) passButton.gameObject.SetActive(false);
-            if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+            SetActionButtonsActive(false);
             return;
         }
 
@@ -717,7 +741,7 @@ public class GameManager : MonoBehaviour
             if (passButton != null)
             {
                 bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
-                passButton.gameObject.SetActive(!isFieldEmpty);
+                passButton.gameObject.SetActive(!isFieldEmpty && !suppressPassAfterPlay);
                 if (!isFieldEmpty)
                 {
                     bool canPass = true;
@@ -730,6 +754,36 @@ public class GameManager : MonoBehaviour
             }
             if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
         }
+    }
+
+    private void SetActionButtonsActive(bool isActive)
+    {
+        if (playButton != null) playButton.gameObject.SetActive(isActive);
+        if (passButton != null) passButton.gameObject.SetActive(isActive);
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(isActive);
+    }
+
+    private bool TryLockPlayerAction()
+    {
+        if (isPlayerActionLocked)
+        {
+            return false;
+        }
+
+        isPlayerActionLocked = true;
+        if (actionLockCoroutine != null)
+        {
+            StopCoroutine(actionLockCoroutine);
+        }
+        actionLockCoroutine = StartCoroutine(ReleaseActionLockAfterDelay(ActionLockSeconds));
+        return true;
+    }
+
+    private IEnumerator ReleaseActionLockAfterDelay(float delaySeconds)
+    {
+        yield return new WaitForSecondsRealtime(delaySeconds);
+        isPlayerActionLocked = false;
+        actionLockCoroutine = null;
     }
 
     private bool IsAnyCardSelected()
@@ -972,6 +1026,7 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
+        if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
             ConfirmSuitLockSelection();
@@ -995,6 +1050,9 @@ public class GameManager : MonoBehaviour
             return;
         }
         if (!isPlayerTurn) return;
+
+        if (passButton != null) passButton.gameObject.SetActive(false);
+        suppressPassAfterPlay = true;
 
         if (isSevenPassMode)
         {
@@ -1268,6 +1326,7 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
+        if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
             CycleSuitLockSelection();
