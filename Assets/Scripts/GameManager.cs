@@ -112,6 +112,7 @@ public class GameManager : MonoBehaviour
 
 
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
+    public bool IsJokerStopActiveForPlay => IsJokerStopActive;
 
 
 

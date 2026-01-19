@@ -9,12 +9,19 @@ public class CpuPlayer : PlayerBase
         if (Hand.Count == 0)
             return new List<Card>();
 
+        var gameManager = GameObject.FindObjectOfType<GameManager>();
+        bool isJokerStopActive = gameManager != null && gameManager.IsJokerStopActiveForPlay;
+        var availableHand = isJokerStopActive ? Hand.Where(c => !c.IsJoker()).ToList() : Hand;
+
+        if (availableHand.Count == 0)
+            return new List<Card>();
+
         List<List<Card>> playableSets = new List<List<Card>>();
 
         // =============================
         // 🔹 1枚出し候補
         // =============================
-        foreach (var card in Hand)
+        foreach (var card in availableHand)
         {
             var single = new List<Card> { card };
             if (CanPlaySelectedCards(tableCards, single))
@@ -24,7 +31,7 @@ public class CpuPlayer : PlayerBase
         // =============================
         // 🔹 同ランク（ペア〜4カード）
         // =============================
-        var groups = Hand.GroupBy(c => c.Rank).Where(g => g.Count() >= 2);
+        var groups = availableHand.GroupBy(c => c.Rank).Where(g => g.Count() >= 2);
         foreach (var g in groups)
         {
             var sameRankCards = g.ToList();
@@ -39,7 +46,7 @@ public class CpuPlayer : PlayerBase
         // =============================
         // 🔹 階段（3〜4枚）
         // =============================
-        var suitGroups = Hand.Where(c => !c.IsJoker()).GroupBy(c => c.Suit);
+        var suitGroups = availableHand.Where(c => !c.IsJoker()).GroupBy(c => c.Suit);
 
         foreach (var suitGroup in suitGroups)
         {
@@ -64,7 +71,7 @@ public class CpuPlayer : PlayerBase
         // 🔹 Joker（Rank=0）の扱い
         // =============================
         // Joker 1枚出しは最強として追加
-        var joker = Hand.FirstOrDefault(c => c.IsJoker());
+        var joker = availableHand.FirstOrDefault(c => c.IsJoker());
         if (joker != null)
         {
             var singleJoker = new List<Card> { joker };
@@ -81,10 +88,9 @@ public class CpuPlayer : PlayerBase
         {
             Debug.Log($"{Name} はパスしました。");
 
-            var gm = GameObject.FindObjectOfType<GameManager>();
-            if (gm != null)
+            if (gameManager != null)
             {
-                gm.StartCoroutine(gm.ShowMessage($"{Name} はパスしました", 2f));
+                gameManager.StartCoroutine(gameManager.ShowMessage($"{Name} はパスしました", 2f));
             }
 
             return new List<Card>();
