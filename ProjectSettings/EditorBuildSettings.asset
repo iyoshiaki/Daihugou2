@@ -29,4 +29,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/SoloOriginal.unity
     guid: d2dfedb0003945a499bb5288118418ce
+  - enabled: 1
+    path: Assets/Scenes/MainScene.unity
+    guid: aa23c363a6270534297e1d6097c132da
   m_configObjects: {}
