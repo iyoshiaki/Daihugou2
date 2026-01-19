@@ -1769,13 +1769,6 @@ public class GameManager : MonoBehaviour
                 return;
             }
         }
-        if (isFourStopWindowActive)
-        {
-            isFourStopWindowActive = false;
-            pendingEightCutCount = 0;
-            StartCoroutine(ClearTableAndRestart());
-            return;
-        }
         passCount++;
 
         // ★修正: 場を流す条件の計算
@@ -1866,15 +1859,6 @@ public class GameManager : MonoBehaviour
             EndTurn();
             return;
         }
-
-        if (isFourStopWindowActive)
-        {
-            isFourStopWindowActive = false;
-            pendingEightCutCount = 0;
-            StartCoroutine(ClearTableAndRestart());
-            return;
-        }
-
         passCount++;
 
         int requiredPasses = remainingPlayers.Count - 1 - lastSkippedCount;
