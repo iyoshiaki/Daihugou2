@@ -2364,6 +2364,7 @@ public class GameManager : MonoBehaviour
     private bool IsBindSatisfied(List<Card> selected)
     {
         if (selected == null || selected.Count == 0) return false;
+        if (IsSingleJokerSelection(selected)) return true;
         if (!IsSuitLockSatisfied(selected)) return false;
         if (!isNumberBindActive && !isSuitBindActive) return true;
 
@@ -2391,12 +2392,19 @@ public class GameManager : MonoBehaviour
     {
         if (!isSuitLockTurnActive) return true;
         if (selected == null || selected.Count == 0) return false;
+        if (IsSingleJokerSelection(selected)) return true;
 
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
         bool isStair = IsStairWithJoker(realSelected, jokerCount);
         var suitSet = GetBindSuitSet(selected, isStair);
         if (suitSet.Count == 0) return false;
         return suitSet.All(s => suitLockSuits.Contains(s));
+    }
+    private bool IsSingleJokerSelection(List<Card> selected)
+    {
+        return selected != null
+            && selected.Count == 1
+            && selected[0].IsJoker();
     }
 
     private int GetBindRank(List<Card> cards, bool isStair)
