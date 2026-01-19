@@ -95,6 +95,15 @@ public class GameManager : MonoBehaviour
     private bool isSuitBindActive = false;
     private int expectedNextRank = -1;
     private HashSet<Suit> boundSuits = new();
+    private bool isSuitLockTurnActive = false;
+    private int suitLockTurnsRemaining = 0;
+    private HashSet<Suit> suitLockSuits = new();
+    private bool isSelectingSuitLock = false;
+    private int suitLockSelectionIndex = 0;
+    private readonly Suit[] suitLockSelectionOptions = { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
+    private bool pendingSuitLockSelection = false;
+    private PlayerBase pendingSuitLockPlayer = null;
+
 
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
 
@@ -165,6 +174,13 @@ public class GameManager : MonoBehaviour
         {
             StartCoroutine(HandleFreezePassTurn(currentPlayer));
             return;
+        }
+
+        isSuitLockTurnActive = suitLockTurnsRemaining > 0;
+        if (isSuitLockTurnActive && suitLockSuits.Count > 0)
+        {
+            var suitMessage = string.Join("・", suitLockSuits.Select(GetSuitLabel));
+            EnqueueMessage($"スートロック中: {suitMessage} のみ");
         }
 
         isSingleOnlyTurn = forceSingleNextTurn;
@@ -349,6 +365,11 @@ public class GameManager : MonoBehaviour
 
         // ★修正チェック: 7渡し/10捨てシーケンスが始まっていれば EndTurn をスキップ
         if (isSevenPassMode || isTenDiscardMode || isSixTradeMode || isFreezeTwelveMode)
+        {
+            yield break;
+        }
+
+        if (isSelectingSuitLock)
         {
             yield break;
         }
@@ -612,7 +633,7 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
-        if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive())
+        if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive())
         {
             if (playButton != null) playButton.gameObject.SetActive(false);
             if (passButton != null) passButton.gameObject.SetActive(false);
@@ -625,6 +646,18 @@ public class GameManager : MonoBehaviour
             playButton.gameObject.SetActive(true);
 
             if (isSelectingTradeTarget)
+            {
+                playButton.interactable = true;
+                if (passButton != null)
+                {
+                    passButton.gameObject.SetActive(true);
+                    passButton.interactable = true;
+                }
+                if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+                return;
+            }
+
+            if (isSelectingSuitLock)
             {
                 playButton.interactable = true;
                 if (passButton != null)
@@ -720,6 +753,10 @@ public class GameManager : MonoBehaviour
     private bool IsFreezeSelectionActive()
     {
         return isFreezeTwelveMode;
+    }
+    private bool IsSuitLockSelectionActive()
+    {
+        return isSelectingSuitLock;
     }
 
     private void CreatePlayerCardSlots(int slotCount)
@@ -914,6 +951,10 @@ public class GameManager : MonoBehaviour
         {
             yield break;
         }
+        if (isSelectingSuitLock)
+        {
+            yield break;
+        }
 
         // ★修正ポイント: スペード3返しなどにより DisplayPlayedCardsOnTable の中で場が流れた場合、
         // ClearTableAndRestart() が呼ばれ、既に StartTurn() によってターンが再開されている。
@@ -931,6 +972,12 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
+        if (isSelectingSuitLock)
+        {
+            ConfirmSuitLockSelection();
+            return;
+        }
+
         if (isSelectingTradeTarget)
         {
             ConfirmTradeTargetSelection();
@@ -1031,6 +1078,11 @@ public class GameManager : MonoBehaviour
         }
 
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+
+        if (!IsSuitLockSatisfied(selected))
+        {
+            return false;
+        }
 
         // --- 単体・役のチェック ---
 
@@ -1216,6 +1268,11 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
+        if (isSelectingSuitLock)
+        {
+            CycleSuitLockSelection();
+            return;
+        }
         if (isSelectingTradeTarget)
         {
             CycleTradeTargetSelection();
@@ -1461,6 +1518,12 @@ public class GameManager : MonoBehaviour
 
         UpdateBindState(fieldBeforePlay, effectivePlayedCards);
 
+        if (IsSuitLockTrigger(effectivePlayedCards))
+        {
+            pendingSuitLockSelection = true;
+            pendingSuitLockPlayer = currentPlayer;
+        }
+
         if (state.TriggerGreatChaos)
         {
             EnqueueMessage("大混乱! 手札がランダムに入れ替わります。");
@@ -1616,6 +1679,13 @@ public class GameManager : MonoBehaviour
 
         if (pendingSkipCount > 0)
         {
+        }
+        if (pendingSuitLockSelection && !isSixTradeMode && !isSevenPassMode && !isTenDiscardMode)
+        {
+            if (TryResolvePendingSuitLockSelection())
+            {
+                yield break;
+            }
         }
 
     }
@@ -2250,8 +2320,9 @@ public class GameManager : MonoBehaviour
 
     private bool IsBindSatisfied(List<Card> selected)
     {
-        if (!isNumberBindActive && !isSuitBindActive) return true;
         if (selected == null || selected.Count == 0) return false;
+        if (!IsSuitLockSatisfied(selected)) return false;
+        if (!isNumberBindActive && !isSuitBindActive) return true;
 
         var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
         bool isStair = IsStairWithJoker(realSelected, jokerCount);
@@ -2272,6 +2343,17 @@ public class GameManager : MonoBehaviour
         }
 
         return true;
+    }
+    private bool IsSuitLockSatisfied(List<Card> selected)
+    {
+        if (!isSuitLockTurnActive) return true;
+        if (selected == null || selected.Count == 0) return false;
+
+        var (realSelected, jokerCount) = GetRealCardsAndJokers(selected);
+        bool isStair = IsStairWithJoker(realSelected, jokerCount);
+        var suitSet = GetBindSuitSet(selected, isStair);
+        if (suitSet.Count == 0) return false;
+        return suitSet.All(s => suitLockSuits.Contains(s));
     }
 
     private int GetBindRank(List<Card> cards, bool isStair)
@@ -2319,6 +2401,135 @@ public class GameManager : MonoBehaviour
         }
 
         return rank < 15 ? rank + 1 : -1;
+    }
+
+    private bool IsSuitLockTrigger(List<Card> effectivePlayed)
+    {
+        if (effectivePlayed == null || effectivePlayed.Count != 3) return false;
+        if (!IsStair(effectivePlayed)) return false;
+        var ranks = effectivePlayed.Select(c => c.Rank).OrderBy(r => r).ToList();
+        return ranks[0] == 6 && ranks[1] == 7 && ranks[2] == 8;
+    }
+
+    private void BeginSuitLockSelection(PlayerBase player)
+    {
+        if (player is not HumanPlayer)
+        {
+            return;
+        }
+
+        isSelectingSuitLock = true;
+        suitLockSelectionIndex = 0;
+        UpdateSuitLockMessage();
+
+        if (playButton != null)
+        {
+            playButton.interactable = true;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "決定";
+        }
+        if (passButton != null)
+        {
+            passButton.gameObject.SetActive(true);
+            passButton.interactable = true;
+        }
+        SetPassButtonLabel("切替");
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+    }
+
+    private void CycleSuitLockSelection()
+    {
+        if (!isSelectingSuitLock) return;
+        suitLockSelectionIndex = (suitLockSelectionIndex + 1) % suitLockSelectionOptions.Length;
+        UpdateSuitLockMessage();
+    }
+
+    private void ConfirmSuitLockSelection()
+    {
+        if (!isSelectingSuitLock) return;
+        var suit = suitLockSelectionOptions[suitLockSelectionIndex];
+        ActivateSuitLock(suit);
+        EndSuitLockSelection();
+        EndTurn();
+    }
+
+    private void UpdateSuitLockMessage()
+    {
+        if (!isSelectingSuitLock) return;
+        var suit = suitLockSelectionOptions[suitLockSelectionIndex];
+        string message = $"スートロック: 次のターンのスートを選択\n<size=120%>{GetSuitLabel(suit)}</size>\nパスで切替 / 出すで決定";
+        ShowMessageText(passMessageText, message);
+    }
+
+    private void EndSuitLockSelection()
+    {
+        isSelectingSuitLock = false;
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+        ResetPlayButtonUI();
+    }
+
+    private void ActivateSuitLock(Suit suit)
+    {
+        suitLockTurnsRemaining = 1;
+        suitLockSuits.Clear();
+        suitLockSuits.Add(suit);
+        EnqueueMessage($"スートロック発動! 次のターンは{GetSuitLabel(suit)}のみ");
+    }
+
+    private bool TryResolvePendingSuitLockSelection()
+    {
+        if (!pendingSuitLockSelection || pendingSuitLockPlayer == null)
+        {
+            return false;
+        }
+
+        var targetPlayer = pendingSuitLockPlayer;
+        pendingSuitLockSelection = false;
+        pendingSuitLockPlayer = null;
+
+        if (targetPlayer is HumanPlayer)
+        {
+            BeginSuitLockSelection(targetPlayer);
+            return true;
+        }
+
+        ActivateSuitLock(ChooseSuitLockForCpu(targetPlayer, null));
+        return false;
+    }
+
+    private Suit ChooseSuitLockForCpu(PlayerBase player, List<Card> effectivePlayed)
+    {
+        var suitCounts = player.Hand
+            .Where(c => !c.IsJoker())
+            .GroupBy(c => c.Suit)
+            .Select(g => new { Suit = g.Key, Count = g.Count() })
+            .OrderByDescending(g => g.Count)
+            .FirstOrDefault();
+
+        if (suitCounts != null)
+        {
+            return suitCounts.Suit;
+        }
+
+        if (effectivePlayed != null && effectivePlayed.Count > 0)
+        {
+            return effectivePlayed[0].Suit;
+        }
+        return Suit.Spade;
+    }
+
+    private void ConsumeSuitLockTurn()
+    {
+        if (!isSuitLockTurnActive) return;
+        suitLockTurnsRemaining = Mathf.Max(0, suitLockTurnsRemaining - 1);
+        if (suitLockTurnsRemaining == 0)
+        {
+            suitLockSuits.Clear();
+        }
+        isSuitLockTurnActive = false;
     }
 
     private void ResetBindState()
@@ -2588,6 +2799,10 @@ public class GameManager : MonoBehaviour
         if (TryConsumeBarrier(targetPlayer, "6トレード"))
         {
             EndSixTradeMode();
+            if (TryResolvePendingSuitLockSelection())
+            {
+                yield break;
+            }
             EndTurn();
             yield break;
         }
@@ -2596,6 +2811,10 @@ public class GameManager : MonoBehaviour
         if (tradeCount <= 0)
         {
             EndSixTradeMode();
+            if (TryResolvePendingSuitLockSelection())
+            {
+                yield break;
+            }
             EndTurn();
             yield break;
         }
@@ -2645,6 +2864,10 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(0.8f);
 
         EndSixTradeMode();
+        if (TryResolvePendingSuitLockSelection())
+        {
+            yield break;
+        }
         EndTurn();
     }
 
@@ -2937,6 +3160,10 @@ public class GameManager : MonoBehaviour
                 passMessageText.text = "";
             }
             ResetPlayButtonUI();
+            if (TryResolvePendingSuitLockSelection())
+            {
+                yield break;
+            }
             EndTurn();
             yield break;
         }
@@ -2992,6 +3219,11 @@ public class GameManager : MonoBehaviour
 
         ResetPlayButtonUI();
 
+        if (TryResolvePendingSuitLockSelection())
+        {
+            yield break;
+        }
+
         EndTurn();
     }
 
@@ -3032,6 +3264,11 @@ public class GameManager : MonoBehaviour
         passMessageText.text = "";
 
         ResetPlayButtonUI();
+
+        if (TryResolvePendingSuitLockSelection())
+        {
+            yield break;
+        }
 
         EndTurn();
     }
