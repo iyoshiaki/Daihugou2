@@ -88,6 +88,7 @@ public class GameManager : MonoBehaviour
 
     private bool isCpuTurnInProgress = false;
     private bool isPlayerActionLocked = false;
+    private bool isPlayerActionInProgress = false;
     private Coroutine actionLockCoroutine = null;
     private const float ActionLockSeconds = 0.2f;
     private bool suppressPassAfterPlay = false;
@@ -176,6 +177,7 @@ public class GameManager : MonoBehaviour
     {
         PlayerBase currentPlayer = players[currentTurnIndex];
         isPlayerActionLocked = false;
+        isPlayerActionInProgress = false;
         suppressPassAfterPlay = false;
         if (IsFreezePassActive(currentPlayer))
         {
@@ -1026,6 +1028,7 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
+        if (isPlayerActionInProgress) return;
         if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
@@ -1067,6 +1070,7 @@ public class GameManager : MonoBehaviour
             }
 
             playButton.interactable = false;
+            isPlayerActionInProgress = true;
             StartCoroutine(ExecuteSevenPassTransfer(human, selected));
             return;
         }
@@ -1084,12 +1088,14 @@ public class GameManager : MonoBehaviour
             }
 
             playButton.interactable = false;
+            isPlayerActionInProgress = true;
             StartCoroutine(ExecuteTenDiscardAction(human, selected));
             return;
         }
 
         if (playButton != null && !playButton.interactable) return;
         if (playButton != null) playButton.interactable = false;
+        isPlayerActionInProgress = true;
 
         var played = human.SelectCards(human.Hand); ;
 
@@ -1097,6 +1103,7 @@ public class GameManager : MonoBehaviour
         {
             Debug.Log("カードが選択されていません。");
             if (playButton != null) playButton.interactable = true;
+            isPlayerActionInProgress = false;
             return;
         }
 
@@ -1104,6 +1111,7 @@ public class GameManager : MonoBehaviour
         {
             Debug.Log("そのカードは出せません。");
             if (playButton != null) playButton.interactable = true;
+            isPlayerActionInProgress = false;
             return;
         }
 
@@ -1326,6 +1334,7 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
+        if (isPlayerActionInProgress) return;
         if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
@@ -1343,6 +1352,7 @@ public class GameManager : MonoBehaviour
             return;
         }
         if (players[currentTurnIndex] != humanPlayer) return;
+        isPlayerActionInProgress = true;
         HandlePass();
     }
 
@@ -1766,6 +1776,7 @@ public class GameManager : MonoBehaviour
             if (HasValidPlayForNineForce(currentPlayer.Hand, lastPlayedCards))
             {
                 EnqueueMessage("9フォース中は出せるカードがある限りパスできません。");
+                isPlayerActionInProgress = false;
                 return;
             }
         }
