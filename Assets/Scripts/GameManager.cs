@@ -3173,6 +3173,7 @@ public class GameManager : MonoBehaviour
             // ★常時表示用にテキストエリアを直接書き換え & 表示
             ShowMessageText(passMessageText, message);
 
+            isPlayerActionInProgress = false;
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
@@ -3180,7 +3181,7 @@ public class GameManager : MonoBehaviour
             if (passButton != null) passButton.interactable = false;
             if (playButton != null)
             {
-                playButton.interactable = false;
+                playButton.interactable = true;
                 playButton.GetComponentInChildren<TextMeshProUGUI>().text = "あげる";
             }
             yield break;
@@ -3209,6 +3210,7 @@ public class GameManager : MonoBehaviour
             // ★常時表示
             ShowMessageText(passMessageText, message);
 
+            isPlayerActionInProgress = false;
             ResetPlayerSelection();
             CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
@@ -3216,7 +3218,7 @@ public class GameManager : MonoBehaviour
             if (passButton != null) passButton.interactable = false;
             if (playButton != null)
             {
-                playButton.interactable = false;
+                playButton.interactable = true;
                 playButton.GetComponentInChildren<TextMeshProUGUI>().text = "捨てる";
             }
             yield break;
