@@ -2761,6 +2761,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        isPlayerActionInProgress = false;
         tradeTargetIndex = 0;
         isSelectingTradeTarget = true;
 
@@ -2812,6 +2813,7 @@ public class GameManager : MonoBehaviour
         tradeTargetPlayer = targetPlayer;
         isSelectingTradeCards = true;
         isSelectingTradeSourceCards = selectingSourceCards;
+        isPlayerActionInProgress = false;
 
         string message = selectingSourceCards
             ? $"トレードに出すカードを\n<size=120%>{pendingTradeCardCount}枚</size>\n選んでください"
@@ -3005,6 +3007,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        isPlayerActionInProgress = false;
         pendingFreezeTwelveCount = count;
         freezeTargetIndex = 0;
         isFreezeTwelveMode = true;
