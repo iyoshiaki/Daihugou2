@@ -281,7 +281,7 @@ public class GameManager : MonoBehaviour
             if (skipCount > 0)
             {
                 var candidate = players[nextTurnIndex];
-                if (TryConsumeBarrier(candidate, "5飛ばし"))
+                if (TryConsumeBarrierForSkipCandidate(candidate))
                 {
                     skipCount--;
                     lastSkippedCount = Mathf.Max(0, lastSkippedCount - 1);
@@ -1848,7 +1848,10 @@ public class GameManager : MonoBehaviour
         EnqueueMessage($"{player.Name} のバリアで{effectName}を無効化!");
         return true;
     }
-
+    private bool TryConsumeBarrierForSkipCandidate(PlayerBase player)
+    {
+        return TryConsumeBarrier(player, "5飛ばし");
+    }
     private IEnumerator HandleFreezePassTurn(PlayerBase player)
     {
         isPlayerTurn = false;
@@ -2731,6 +2734,11 @@ public class GameManager : MonoBehaviour
             yield break;
         }
 
+        if (TryConsumeBarrierForTradeTarget(tradeTargetPlayer))
+        {
+            yield break;
+        }
+
         pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
         if (pendingTradeCardCount <= 0)
         {
@@ -2795,6 +2803,11 @@ public class GameManager : MonoBehaviour
 
         tradeTargetPlayer = tradeTargetCandidates[tradeTargetIndex];
         isSelectingTradeTarget = false;
+
+        if (TryConsumeBarrierForTradeTarget(tradeTargetPlayer))
+        {
+            return;
+        }
 
         pendingTradeCardCount = Mathf.Min(pendingTradeCardCount, tradeSourcePlayer.Hand.Count, tradeTargetPlayer.Hand.Count);
         if (pendingTradeCardCount <= 0)
@@ -2957,6 +2970,23 @@ public class GameManager : MonoBehaviour
         ResetPlayButtonUI();
     }
 
+    private bool TryConsumeBarrierForTradeTarget(PlayerBase targetPlayer)
+    {
+        if (!TryConsumeBarrier(targetPlayer, "6トレード"))
+        {
+            return false;
+        }
+
+        EndSixTradeMode();
+        if (TryResolvePendingSuitLockSelection())
+        {
+            return true;
+        }
+
+        EndTurn();
+        return true;
+    }
+
     private void UpdateTradeTargetMessage()
     {
         if (tradeTargetCandidates.Count == 0) return;
@@ -3040,7 +3070,10 @@ public class GameManager : MonoBehaviour
         if (!isFreezeTwelveMode || freezeTargetCandidates.Count == 0) return;
 
         var target = freezeTargetCandidates[freezeTargetIndex];
-        AddFreezePass(target, 1);
+        if (!TryConsumeBarrierForFreezeTarget(target))
+        {
+            AddFreezePass(target, 1);
+        }
         pendingFreezeTwelveCount--;
 
         if (pendingFreezeTwelveCount <= 0)
@@ -3088,7 +3121,10 @@ public class GameManager : MonoBehaviour
         var targets = GetFreezeTargetCandidates(sourcePlayer);
         foreach (var target in targets)
         {
-            AddFreezePass(target, 1);
+            if (!TryConsumeBarrierForFreezeTarget(target))
+            {
+                AddFreezePass(target, 1);
+            }
         }
         EnqueueMessage("フリーズ THE 12: 全員パス!");
     }
@@ -3101,17 +3137,16 @@ public class GameManager : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             var target = targets[i % targets.Count];
-            AddFreezePass(target, 1);
+            if (!TryConsumeBarrierForFreezeTarget(target))
+            {
+                AddFreezePass(target, 1);
+            }
         }
         EnqueueMessage($"フリーズ THE 12: {count}人をパス状態にしました。");
     }
 
     private void AddFreezePass(PlayerBase target, int count)
     {
-        if (TryConsumeBarrier(target, "フリーズ12"))
-        {
-            return;
-        }
         if (!freezePassCounts.ContainsKey(target))
         {
             freezePassCounts[target] = 0;
@@ -3119,9 +3154,17 @@ public class GameManager : MonoBehaviour
         freezePassCounts[target] += count;
         EnqueueMessage($"{target.Name} はフリーズでパスになります。");
     }
+    private bool TryConsumeBarrierForFreezeTarget(PlayerBase target)
+    {
+        return TryConsumeBarrier(target, "フリーズ12");
+    }
 
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
+        if (TryConsumeBarrierForSevenPassTarget(player))
+        {
+            yield break;
+        }
         // ★修正: メッセージを具体的に
         string message = $"渡すカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
 
@@ -3193,46 +3236,16 @@ public class GameManager : MonoBehaviour
 
     public IEnumerator ExecuteSevenPassTransfer(PlayerBase fromPlayer, List<Card> cards)
     {
-        // --- 修正箇所 開始 ---
-        // 単純な +1 ではなく、remainingPlayers に含まれているプレイヤーが見つかるまで探す
-        int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
-        PlayerBase toPlayer = players[nextIndex];
-
-        int safetyLoop = 0;
-        // ターゲットが「あがった人（remainingPlayersに含まれない人）」である間、次へ進める
-        while (!remainingPlayers.Contains(toPlayer))
+        PlayerBase toPlayer = GetNextRemainingPlayer(fromPlayer);
+        if (toPlayer == null)
         {
-            nextIndex = (nextIndex + 1) % players.Count;
-            toPlayer = players[nextIndex];
-
-            // 無限ループ防止（念のため）
-            safetyLoop++;
-            if (safetyLoop > players.Count)
-            {
-                Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
-                break;
-            }
-        }
-        // --- 修正箇所 終了 ---
-
-        Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
-
-        if (TryConsumeBarrier(toPlayer, "7渡し"))
-        {
+            Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
             isSevenPassMode = false;
-            if (passMessageText != null)
-            {
-                passMessageText.gameObject.SetActive(false);
-                passMessageText.text = "";
-            }
             ResetPlayButtonUI();
-            if (TryResolvePendingSuitLockSelection())
-            {
-                yield break;
-            }
             EndTurn();
             yield break;
         }
+        Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
 
         foreach (var card in cards)
         {
@@ -3291,6 +3304,54 @@ public class GameManager : MonoBehaviour
         }
 
         EndTurn();
+    }
+    private PlayerBase GetNextRemainingPlayer(PlayerBase fromPlayer)
+    {
+        int nextIndex = (players.IndexOf(fromPlayer) + 1) % players.Count;
+        PlayerBase toPlayer = players[nextIndex];
+
+        int safetyLoop = 0;
+        while (!remainingPlayers.Contains(toPlayer))
+        {
+            nextIndex = (nextIndex + 1) % players.Count;
+            toPlayer = players[nextIndex];
+
+            safetyLoop++;
+            if (safetyLoop > players.Count)
+            {
+                return null;
+            }
+        }
+
+        return toPlayer;
+    }
+
+    private bool TryConsumeBarrierForSevenPassTarget(PlayerBase fromPlayer)
+    {
+        PlayerBase toPlayer = GetNextRemainingPlayer(fromPlayer);
+        if (toPlayer == null)
+        {
+            return false;
+        }
+
+        if (!TryConsumeBarrier(toPlayer, "7渡し"))
+        {
+            return false;
+        }
+
+        isSevenPassMode = false;
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+        ResetPlayButtonUI();
+        if (TryResolvePendingSuitLockSelection())
+        {
+            return true;
+        }
+        EndTurn();
+        return true;
     }
 
     public IEnumerator ExecuteTenDiscardAction(PlayerBase player, List<Card> cards)
@@ -3371,8 +3432,7 @@ public class GameManager : MonoBehaviour
         foreach (var target in targets)
         {
             if (target.Hand.Count == 0) continue;
-            if (TryConsumeBarrier(target, "12ペナルティ")) continue;
-
+            if (TryConsumeBarrierForTwelvePenaltyTarget(target)) continue;
             var strongestCard = GetStrongestCard(target);
             if (strongestCard == null) continue;
 
@@ -3394,6 +3454,10 @@ public class GameManager : MonoBehaviour
             CheckForWin(target);
             if (isGameOver) break;
         }
+    }
+    private bool TryConsumeBarrierForTwelvePenaltyTarget(PlayerBase target)
+    {
+        return TryConsumeBarrier(target, "12ペナルティ");
     }
 
     private void ResetPlayButtonUI()
