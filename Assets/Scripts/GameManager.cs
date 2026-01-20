@@ -107,6 +107,7 @@ public class GameManager : MonoBehaviour
     private bool isSelectingSuitLock = false;
     private int suitLockSelectionIndex = 0;
     private readonly Suit[] suitLockSelectionOptions = { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
+    private List<Suit> suitLockSelectableSuits = new();
     private bool pendingSuitLockSelection = false;
     private PlayerBase pendingSuitLockPlayer = null;
 
@@ -2485,6 +2486,7 @@ public class GameManager : MonoBehaviour
         }
 
         isSelectingSuitLock = true;
+        suitLockSelectableSuits = GetSuitLockSelectableSuits(player);
         suitLockSelectionIndex = 0;
         UpdateSuitLockMessage();
 
@@ -2505,14 +2507,16 @@ public class GameManager : MonoBehaviour
     private void CycleSuitLockSelection()
     {
         if (!isSelectingSuitLock) return;
-        suitLockSelectionIndex = (suitLockSelectionIndex + 1) % suitLockSelectionOptions.Length;
+        if (suitLockSelectableSuits.Count == 0) return;
+        suitLockSelectionIndex = (suitLockSelectionIndex + 1) % suitLockSelectableSuits.Count;
         UpdateSuitLockMessage();
     }
 
     private void ConfirmSuitLockSelection()
     {
         if (!isSelectingSuitLock) return;
-        var suit = suitLockSelectionOptions[suitLockSelectionIndex];
+        if (suitLockSelectableSuits.Count == 0) return;
+        var suit = suitLockSelectableSuits[suitLockSelectionIndex];
         ActivateSuitLock(suit);
         EndSuitLockSelection();
         EndTurn();
@@ -2521,7 +2525,12 @@ public class GameManager : MonoBehaviour
     private void UpdateSuitLockMessage()
     {
         if (!isSelectingSuitLock) return;
-        var suit = suitLockSelectionOptions[suitLockSelectionIndex];
+        if (suitLockSelectableSuits.Count == 0)
+        {
+            ShowMessageText(passMessageText, "スートロック: 選択可能なスートがありません");
+            return;
+        }
+        var suit = suitLockSelectableSuits[suitLockSelectionIndex];
         string message = $"スートロック: 次のターンのスートを選択\n<size=120%>{GetSuitLabel(suit)}</size>\nパスで切替 / 出すで決定";
         ShowMessageText(passMessageText, message);
     }
@@ -2529,12 +2538,34 @@ public class GameManager : MonoBehaviour
     private void EndSuitLockSelection()
     {
         isSelectingSuitLock = false;
+        suitLockSelectableSuits.Clear();
         if (passMessageText != null)
         {
             passMessageText.gameObject.SetActive(false);
             passMessageText.text = "";
         }
         ResetPlayButtonUI();
+    }
+
+    private List<Suit> GetSuitLockSelectableSuits(PlayerBase player)
+    {
+        var nonJokerSuits = player.Hand
+            .Where(card => !card.IsJoker())
+            .Select(card => card.Suit)
+            .Distinct()
+            .ToList();
+
+        if (nonJokerSuits.Count > 0)
+        {
+            return nonJokerSuits;
+        }
+
+        if (player.Hand.Any(card => card.IsJoker()))
+        {
+            return suitLockSelectionOptions.ToList();
+        }
+
+        return new List<Suit>();
     }
 
     private void ActivateSuitLock(Suit suit)
