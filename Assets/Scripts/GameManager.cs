@@ -717,11 +717,16 @@ public class GameManager : MonoBehaviour
 
                     int selectedCount = human.SelectCards(human.Hand).Count;
 
-                    int required = isSelectingTradeCards
-                        ? Mathf.Min(pendingTradeCardCount, human.Hand.Count)
-                        : Mathf.Min(pendingActionCardCount, human.Hand.Count);
-
-                    playButton.interactable = (selectedCount == required);
+                    if (isSelectingTradeCards)
+                    {
+                        int required = Mathf.Min(pendingTradeCardCount, human.Hand.Count);
+                        playButton.interactable = (selectedCount == required);
+                    }
+                    else
+                    {
+                        int maxAllowed = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+                        playButton.interactable = (selectedCount <= maxAllowed);
+                    }
                 }
                 if (passButton != null) passButton.gameObject.SetActive(false);
                 if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
@@ -1062,11 +1067,11 @@ public class GameManager : MonoBehaviour
         if (isSevenPassMode)
         {
             var selected = human.SelectCards(human.Hand);
-            int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+            int maxAllowed = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-            if (selected.Count != required)
+            if (selected.Count > maxAllowed)
             {
-                EnqueueMessage($"{required}枚 選んでください");
+                EnqueueMessage($"{maxAllowed}枚まで選べます");
                 ClearPassMessage();
                 return;
             }
@@ -1074,17 +1079,15 @@ public class GameManager : MonoBehaviour
             playButton.interactable = false;
             isPlayerActionInProgress = true;
             StartCoroutine(ExecuteSevenPassTransfer(human, selected));
-            return;
         }
-
-        if (isTenDiscardMode)
+        else if (isTenDiscardMode)
         {
             var selected = human.SelectCards(human.Hand);
-            int required = Mathf.Min(pendingActionCardCount, human.Hand.Count);
+            int maxAllowed = Mathf.Min(pendingActionCardCount, human.Hand.Count);
 
-            if (selected.Count != required)
+            if (selected.Count > maxAllowed)
             {
-                EnqueueMessage($"{required}枚 選んでください");
+                EnqueueMessage($"{maxAllowed}枚まで選べます");
                 ClearPassMessage();
                 return;
             }
@@ -1092,34 +1095,35 @@ public class GameManager : MonoBehaviour
             playButton.interactable = false;
             isPlayerActionInProgress = true;
             StartCoroutine(ExecuteTenDiscardAction(human, selected));
-            return;
         }
-
-        if (playButton != null && !playButton.interactable) return;
-        if (playButton != null) playButton.interactable = false;
-        isPlayerActionInProgress = true;
-
-        var played = human.SelectCards(human.Hand); ;
-
-        if (played == null || played.Count == 0)
+        else
         {
-            Debug.Log("カードが選択されていません。");
-            if (playButton != null) playButton.interactable = true;
-            isPlayerActionInProgress = false;
-            return;
+            if (playButton != null && !playButton.interactable) return;
+            if (playButton != null) playButton.interactable = false;
+            isPlayerActionInProgress = true;
+
+            var played = human.SelectCards(human.Hand); ;
+
+            if (played == null || played.Count == 0)
+            {
+                Debug.Log("カードが選択されていません。");
+                if (playButton != null) playButton.interactable = true;
+                isPlayerActionInProgress = false;
+                return;
+            }
+
+            if (!IsValidPlay(human.Hand, played, lastPlayedCards))
+            {
+                Debug.Log("そのカードは出せません。");
+                if (playButton != null) playButton.interactable = true;
+                isPlayerActionInProgress = false;
+                return;
+            }
+
+            played = played.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
+
+            StartCoroutine(PlayerPlayRoutine(played));
         }
-
-        if (!IsValidPlay(human.Hand, played, lastPlayedCards))
-        {
-            Debug.Log("そのカードは出せません。");
-            if (playButton != null) playButton.interactable = true;
-            isPlayerActionInProgress = false;
-            return;
-        }
-
-        played = played.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
-
-        StartCoroutine(PlayerPlayRoutine(played));
     }
 
     private bool IsValidPlay(List<Card> hand, List<Card> selected, List<Card> field)
@@ -3197,8 +3201,8 @@ public class GameManager : MonoBehaviour
             yield break;
         }
         // ★修正: メッセージを具体的に
-        string message = $"渡すカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
-
+        int maxAllowed = Mathf.Min(pendingActionCardCount, player.Hand.Count);
+        string message = $"渡すカードを\n<size=120%>0〜{maxAllowed}枚</size>\n選んでください";
         if (player is HumanPlayer)
         {
             // ★常時表示用にテキストエリアを直接書き換え & 表示
@@ -3224,7 +3228,8 @@ public class GameManager : MonoBehaviour
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
-            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            int cpuMaxAllowed = Mathf.Min(pendingActionCardCount, hand.Count);
+            int count = Random.Range(0, cpuMaxAllowed + 1);
             var cardsToPass = hand.Take(count).ToList();
 
             yield return StartCoroutine(ExecuteSevenPassTransfer(player, cardsToPass));
@@ -3234,8 +3239,8 @@ public class GameManager : MonoBehaviour
     private IEnumerator HandleTenDiscardSequence(PlayerBase player)
     {
         // ★修正: メッセージを具体的に
-        string message = $"捨てるカードを\n<size=120%>{pendingActionCardCount}枚</size>\n選んでください";
-
+        int maxAllowed = Mathf.Min(pendingActionCardCount, player.Hand.Count);
+        string message = $"捨てるカードを\n<size=120%>0〜{maxAllowed}枚</size>\n選んでください";
         if (player is HumanPlayer)
         {
             // ★常時表示
@@ -3260,7 +3265,8 @@ public class GameManager : MonoBehaviour
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
-            int count = Mathf.Min(pendingActionCardCount, hand.Count);
+            int cpuMaxAllowed = Mathf.Min(pendingActionCardCount, hand.Count);
+            int count = Random.Range(0, cpuMaxAllowed + 1);
             var cardsToDiscard = hand.Take(count).ToList();
 
             yield return StartCoroutine(ExecuteTenDiscardAction(player, cardsToDiscard));
