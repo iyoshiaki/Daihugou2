@@ -55,6 +55,14 @@ public class GameManager : MonoBehaviour
 
     [SerializeField] private TextMeshProUGUI passMessageText;
     [SerializeField] private TextMeshProUGUI SibariMessageText;
+    [SerializeField] private TextMeshProUGUI cpu1NameText;
+    [SerializeField] private TextMeshProUGUI cpu2NameText;
+    [SerializeField] private TextMeshProUGUI cpu3NameText;
+    [SerializeField] private TextMeshProUGUI cpu1PreviousRankText;
+    [SerializeField] private TextMeshProUGUI cpu2PreviousRankText;
+    [SerializeField] private TextMeshProUGUI cpu3PreviousRankText;
+    [SerializeField] private TextMeshProUGUI playerNameText;
+    [SerializeField] private TextMeshProUGUI playerPreviousRankText;
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
@@ -630,6 +638,10 @@ public class GameManager : MonoBehaviour
 
         remainingPlayers = new List<PlayerBase>(players);
         currentGameCount = 1;
+        AssignRankTextReferences();
+        InitializeDebugPreviousRanks();
+        UpdateCpuHeaderText();
+        UpdatePreviousRankText();
 
         rules.Add(new ElevenSilenceRule());
         rules.Add(new EightCutRule());
@@ -648,6 +660,81 @@ public class GameManager : MonoBehaviour
 
         StartTurn();
     }
+
+    private void UpdateCpuHeaderText()
+    {
+        if (cpu1NameText != null) cpu1NameText.text = cpuPlayers.Count >= 1 ? "CPU1" : "";
+        if (cpu2NameText != null) cpu2NameText.text = cpuPlayers.Count >= 2 ? "CPU2" : "";
+        if (cpu3NameText != null) cpu3NameText.text = cpuPlayers.Count >= 3 ? "CPU3" : "";
+        if (playerNameText != null) playerNameText.text = "プレイヤー";
+    }
+
+    private void AssignRankTextReferences()
+    {
+        AssignTextReference(ref cpu1NameText, "CPU1NameText");
+        AssignTextReference(ref cpu2NameText, "CPU2NameText");
+        AssignTextReference(ref cpu3NameText, "CPU3NameText");
+        AssignTextReference(ref cpu1PreviousRankText, "CPU1PreviousRankText");
+        AssignTextReference(ref cpu2PreviousRankText, "CPU2PreviousRankText");
+        AssignTextReference(ref cpu3PreviousRankText, "CPU3PreviousRankText");
+        AssignTextReference(ref playerNameText, "PlayerNameText");
+        AssignTextReference(ref playerPreviousRankText, "PlayerPreviousRankText");
+    }
+
+    private void AssignTextReference(ref TextMeshProUGUI target, string objectName)
+    {
+        if (target != null) return;
+        var obj = GameObject.Find(objectName);
+        if (obj == null) return;
+        target = obj.GetComponent<TextMeshProUGUI>();
+    }
+
+    private void InitializeDebugPreviousRanks()
+    {
+        if (previousRoundRanks.Count > 0) return;
+
+        previousRoundRanks.Clear();
+        previousRoundRanks[humanPlayer] = 1;
+        if (cpuPlayers.Count >= 1) previousRoundRanks[cpuPlayers[0]] = 2;
+        if (cpuPlayers.Count >= 2) previousRoundRanks[cpuPlayers[1]] = 3;
+        if (cpuPlayers.Count >= 3) previousRoundRanks[cpuPlayers[2]] = 4;
+        SetPreviousRoundTitles();
+    }
+
+    private void UpdatePreviousRankText()
+    {
+        bool showRanks = previousRoundRanks.Count > 0;
+        if (cpu1PreviousRankText != null)
+        {
+            cpu1PreviousRankText.gameObject.SetActive(showRanks);
+            cpu1PreviousRankText.text = showRanks && cpuPlayers.Count >= 1 && previousRoundRanks.TryGetValue(cpuPlayers[0], out var rank1)
+                ? $"{rank1}位"
+                : "";
+        }
+        if (cpu2PreviousRankText != null)
+        {
+            cpu2PreviousRankText.gameObject.SetActive(showRanks);
+            cpu2PreviousRankText.text = showRanks && cpuPlayers.Count >= 2 && previousRoundRanks.TryGetValue(cpuPlayers[1], out var rank2)
+                ? $"{rank2}位"
+                : "";
+        }
+        if (cpu3PreviousRankText != null)
+        {
+            cpu3PreviousRankText.gameObject.SetActive(showRanks);
+            cpu3PreviousRankText.text = showRanks && cpuPlayers.Count >= 3 && previousRoundRanks.TryGetValue(cpuPlayers[2], out var rank3)
+                ? $"{rank3}位"
+                : "";
+        }
+        if (playerPreviousRankText != null)
+        {
+            playerPreviousRankText.gameObject.SetActive(showRanks);
+            playerPreviousRankText.text = showRanks && previousRoundRanks.TryGetValue(humanPlayer, out var playerRank)
+                ? $"{playerRank}位"
+                : "";
+        }
+    }
+
+
     void Update()
     {
         if (playButton != null && passButton != null)
@@ -3573,6 +3660,7 @@ public class GameManager : MonoBehaviour
 
         previousRoundRanks = new Dictionary<PlayerBase, int>(gameRanks);
         SetPreviousRoundTitles();
+        UpdatePreviousRankText();
 
         yield return new WaitForSeconds(3.0f);
 
@@ -3599,6 +3687,7 @@ public class GameManager : MonoBehaviour
         passCount = 0;
         lastPlayedCards.Clear();
         ResetBindState();
+        UpdatePreviousRankText();
 
         foreach (Transform child in tableArea) Destroy(child.gameObject);
 
