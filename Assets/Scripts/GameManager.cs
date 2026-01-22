@@ -708,28 +708,28 @@ public class GameManager : MonoBehaviour
         {
             cpu1PreviousRankText.gameObject.SetActive(showRanks);
             cpu1PreviousRankText.text = showRanks && cpuPlayers.Count >= 1 && previousRoundRanks.TryGetValue(cpuPlayers[0], out var rank1)
-                ? $"{rank1}位"
+                ? GetRankDisplayText(rank1)
                 : "";
         }
         if (cpu2PreviousRankText != null)
         {
             cpu2PreviousRankText.gameObject.SetActive(showRanks);
             cpu2PreviousRankText.text = showRanks && cpuPlayers.Count >= 2 && previousRoundRanks.TryGetValue(cpuPlayers[1], out var rank2)
-                ? $"{rank2}位"
+                ? GetRankDisplayText(rank2)
                 : "";
         }
         if (cpu3PreviousRankText != null)
         {
             cpu3PreviousRankText.gameObject.SetActive(showRanks);
             cpu3PreviousRankText.text = showRanks && cpuPlayers.Count >= 3 && previousRoundRanks.TryGetValue(cpuPlayers[2], out var rank3)
-                ? $"{rank3}位"
+                ? GetRankDisplayText(rank3)
                 : "";
         }
         if (playerPreviousRankText != null)
         {
             playerPreviousRankText.gameObject.SetActive(showRanks);
             playerPreviousRankText.text = showRanks && previousRoundRanks.TryGetValue(humanPlayer, out var playerRank)
-                ? $"{playerRank}位"
+                 ? GetRankDisplayText(playerRank)
                 : "";
         }
     }
@@ -2021,6 +2021,7 @@ public class GameManager : MonoBehaviour
         }
 
         yield return new WaitForSeconds(0.6f);
+        isCpuTurnInProgress = false;
         StartTurn();
     }
 
@@ -3640,6 +3641,15 @@ public class GameManager : MonoBehaviour
             4 => "大貧民",
             _ => $"{rank}位"
         };
+    }
+    private string GetRankDisplayText(int rank)
+    {
+        if (rank <= 4)
+        {
+            return $"{rank}位 {GetRankTitle(rank)}";
+        }
+
+        return $"{rank}位";
     }
 
     private void SetPreviousRoundTitles()
