@@ -91,7 +91,7 @@ public class GameManager : MonoBehaviour
     private bool isRevolution = false;
     // ★ 一時的な11バック状態フラグ
     private bool isTempRevolution = false;
-    private bool isElevenSilenceNextField = false;
+    private int elevenSilenceFieldsRemaining = 0;
     private bool isNineForceActive = false;
 
     private bool isCpuTurnInProgress = false;
@@ -122,6 +122,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
     public bool IsJokerStopActiveForPlay => IsJokerStopActive;
+    private bool IsElevenSilenceActive => elevenSilenceFieldsRemaining > 0;
 
 
 
@@ -1642,11 +1643,10 @@ public class GameManager : MonoBehaviour
         List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
-        bool isSilenceCarryover = isElevenSilenceNextField;
+        bool isElevenSilenceActive = IsElevenSilenceActive;
 
-        if (isSilenceCarryover)
+        if (isElevenSilenceActive)
         {
-            isElevenSilenceNextField = false;
             state.IsElevenSilence = true;
         }
         else
@@ -1680,11 +1680,12 @@ public class GameManager : MonoBehaviour
 
         if (state.IsElevenSilence)
         {
-            EnqueueMessage(isSilenceCarryover ? "11サイレンス中!" : "11サイレンス!");
-            if (!isSilenceCarryover)
+            bool triggeredElevenSilenceThisPlay = !isElevenSilenceActive;
+            if (triggeredElevenSilenceThisPlay)
             {
-                isElevenSilenceNextField = true;
+                elevenSilenceFieldsRemaining = 2;
             }
+            EnqueueMessage(triggeredElevenSilenceThisPlay ? "11サイレンス!" : "11サイレンス中!");
         }
 
         if (state.ForceSingleNextTurn)
@@ -1803,6 +1804,7 @@ public class GameManager : MonoBehaviour
                 isTempRevolution = false;
                 isNineForceActive = false;
                 ResetBindState();
+                ConsumeElevenSilenceField();
 
                 if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
                 {
@@ -2038,6 +2040,7 @@ public class GameManager : MonoBehaviour
         isSixStopWindowActive = false;
         pendingTwoCount = 0;
         ResetBindState();
+        ConsumeElevenSilenceField();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
@@ -2061,6 +2064,13 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(0.6f);
         isCpuTurnInProgress = false;
         StartTurn();
+    }
+    private void ConsumeElevenSilenceField()
+    {
+        if (elevenSilenceFieldsRemaining > 0)
+        {
+            elevenSilenceFieldsRemaining--;
+        }
     }
 
     public IEnumerator ShowMessage(string message, float duration = 2f)
@@ -2516,6 +2526,11 @@ public class GameManager : MonoBehaviour
 
     private void UpdateBindState(List<Card> previousField, List<Card> currentPlayed)
     {
+        if (IsElevenSilenceActive)
+        {
+            ResetBindState();
+            return;
+        }
         if (previousField == null || previousField.Count == 0) return;
 
         var (prevReal, prevJokers) = GetRealCardsAndJokers(previousField);
@@ -2562,6 +2577,7 @@ public class GameManager : MonoBehaviour
     private bool IsBindSatisfied(List<Card> selected)
     {
         if (selected == null || selected.Count == 0) return false;
+        if (IsElevenSilenceActive) return IsSuitLockSatisfied(selected);
         if (IsSingleJokerSelection(selected)) return true;
         if (!IsSuitLockSatisfied(selected)) return false;
         if (!isNumberBindActive && !isSuitBindActive) return true;
