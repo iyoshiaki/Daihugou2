@@ -481,7 +481,19 @@ public class GameManager : MonoBehaviour
         var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
         bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
         int fieldCount = field.Count;
-        int fieldRank = field[0].Rank;
+        int fieldStrongestRank;
+        if (isFieldStair)
+        {
+            fieldStrongestRank = GetStairMaxRank(fieldRealCards, fieldJokers);
+        }
+        else if (fieldRealCards.Count == 0 && fieldJokers > 0)
+        {
+            fieldStrongestRank = 16;
+        }
+        else
+        {
+            fieldStrongestRank = fieldRealCards.Count > 0 ? fieldRealCards[0].Rank : 3;
+        }
 
         if (!isFieldStair)
         {
@@ -500,7 +512,7 @@ public class GameManager : MonoBehaviour
             }
 
             // 通常処理
-            var fieldStrength = GetCardStrength(fieldRank);
+            var fieldStrength = GetCardStrength(fieldStrongestRank);
 
             // ジョーカー単体の場合、fieldRankはどうなっているか？
             // 実際のロジックでは IsValidPlay 側で Joker = 16 と判定するが、
@@ -508,14 +520,40 @@ public class GameManager : MonoBehaviour
             // JokerのRankが適切に設定されていないと fieldStrength がおかしくなる可能性がある。
             // ただし上の if (IsJoker) ブロックで処理しているので、ここはJoker以外が流れてくる想定。
 
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
             var candidates = hand
+                .Where(c => !c.IsJoker())
                 .GroupBy(c => c.Rank)
-                .Where(g => g.Count() >= fieldCount && GetCardStrength(g.Key) > fieldStrength)
-                .OrderBy(g => GetCardStrength(g.Key)) // 弱い順に出す
-                .FirstOrDefault();
+                .Where(g => GetCardStrength(g.Key) > fieldStrength)
+                .OrderBy(g => GetCardStrength(g.Key)); // 弱い順に出す
 
-            var candidateList = candidates?.Take(fieldCount).ToList() ?? new List<Card>();
-            return candidateList.Count > 0 && IsBindSatisfied(candidateList) ? candidateList : new List<Card>();
+            foreach (var candidateGroup in candidates)
+            {
+                var candidateCards = candidateGroup.ToList();
+                if (joker != null)
+                {
+                    candidateCards.Add(joker);
+                }
+
+                if (candidateCards.Count < fieldCount)
+                {
+                    continue;
+                }
+
+                var combo = FindBindSatisfiedCombo(candidateCards, fieldCount);
+                if (combo.Count > 0)
+                {
+                    return combo;
+                }
+            }
+
+            if (joker != null && fieldCount == 1 && GetCardStrength(16) > fieldStrength)
+            {
+                var singleJoker = new List<Card> { joker };
+                return IsBindSatisfied(singleJoker) ? singleJoker : new List<Card>();
+            }
+
+            return new List<Card>();
         }
         else
         {
@@ -2245,21 +2283,25 @@ public class GameManager : MonoBehaviour
         List<Card> playable = new List<Card>();
         int fieldCount = field.Count;
 
-        // ★UI用: ジョーカー単体の場合は最強(16)とする
+        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
+        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
+
+        // ★UI用: ジョーカー込みの強さ計算を共通化（階段/同ランク）
         int fieldStrongestRank;
-        if (field.Count == 1 && field[0].IsJoker())
+        if (isFieldStair)
+        {
+            fieldStrongestRank = GetStairMaxRank(fieldRealCards, fieldJokers);
+        }
+        else if (fieldRealCards.Count == 0 && fieldJokers > 0)
         {
             fieldStrongestRank = 16;
         }
         else
         {
-            fieldStrongestRank = field.Max(c => c.Rank);
+            fieldStrongestRank = fieldRealCards.Count > 0 ? fieldRealCards[0].Rank : 3;
         }
 
         int fieldStrength = GetCardStrength(fieldStrongestRank);
-
-        var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
-        bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
 
 
         if (!isFieldStair)
@@ -2275,7 +2317,8 @@ public class GameManager : MonoBehaviour
                 }
             }
 
-            var groups = hand.GroupBy(c => c.Rank);
+            var joker = hand.FirstOrDefault(c => c.IsJoker());
+            var groups = hand.Where(c => !c.IsJoker()).GroupBy(c => c.Rank);
 
             foreach (var g in groups)
             {
@@ -2287,6 +2330,10 @@ public class GameManager : MonoBehaviour
                     if (GetCardStrength(g.Key) > fieldStrength)
                     {
                         var candidate = g.ToList();
+                        if (joker != null)
+                        {
+                            candidate.Add(joker);
+                        }
                         foreach (var playableCard in GetPlayableCardsFromGroup(candidate, fieldCount))
                         {
                             if (!playable.Contains(playableCard))
@@ -2295,6 +2342,14 @@ public class GameManager : MonoBehaviour
                             }
                         }
                     }
+                }
+            }
+            if (joker != null && fieldCount == 1 && GetCardStrength(16) > fieldStrength)
+            {
+                var singleJoker = new List<Card> { joker };
+                if (IsBindSatisfied(singleJoker))
+                {
+                    playable.Add(joker);
                 }
             }
         }
@@ -2351,6 +2406,41 @@ public class GameManager : MonoBehaviour
 
         BuildCombination(0);
         return playableCards;
+    }
+
+    private List<Card> FindBindSatisfiedCombo(List<Card> groupCards, int requiredCount)
+    {
+        if (groupCards == null || groupCards.Count < requiredCount)
+        {
+            return new List<Card>();
+        }
+
+        var combo = new List<Card>(requiredCount);
+        List<Card> found = null;
+
+        void Search(int startIndex)
+        {
+            if (found != null) return;
+            if (combo.Count == requiredCount)
+            {
+                if (IsBindSatisfied(combo))
+                {
+                    found = new List<Card>(combo);
+                }
+                return;
+            }
+
+            for (int i = startIndex; i <= groupCards.Count - (requiredCount - combo.Count); i++)
+            {
+                combo.Add(groupCards[i]);
+                Search(i + 1);
+                combo.RemoveAt(combo.Count - 1);
+                if (found != null) return;
+            }
+        }
+
+        Search(0);
+        return found ?? new List<Card>();
     }
 
     private List<Card> GetEffectivePlayedCards(List<Card> original)
