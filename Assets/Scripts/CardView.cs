@@ -179,6 +179,7 @@ public class CardView : MonoBehaviour, IPointerClickHandler
     {
         // Debug.Log($"SetPlayable() called for {CardData.Suit}{CardData.Rank} - canPlay={canPlay}");
         var image = GetComponent<Image>();
+        isPlayable = canPlay;
 
         if (canPlay)
         {

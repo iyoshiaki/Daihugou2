@@ -31,6 +31,9 @@ public class GameManager : MonoBehaviour
     [Header("Rule Settings")]
     [Tooltip("7渡しや10捨てのような特殊アクションの結果としてあがることを禁止する")]
     private bool forbidSpecialWin = false; // 初期値はOFF（許可）
+    [SerializeField]
+    [Tooltip("第2戦以降に都落ち（前回順位に応じたカード交換）を実施する")]
+    private bool enableMiyakoOchi = true;
 
     // 4回戦の設定
     private const int TotalGames = 4;
@@ -162,6 +165,7 @@ public class GameManager : MonoBehaviour
     private bool isSelectingTradeTarget = false;
     private bool isSelectingTradeCards = false;
     private bool isSelectingTradeSourceCards = false;
+    private bool isSelectingMiyakoOchiCards = false;
 
     private int pendingActionCardCount = 0; // 渡す/捨てる枚数
 
@@ -177,6 +181,9 @@ public class GameManager : MonoBehaviour
     private int freezeTargetIndex = 0;
     private Dictionary<PlayerBase, int> freezePassCounts = new();
     private Dictionary<PlayerBase, int> barrierCounts = new();
+    private int miyakoTradeCount = 0;
+    private bool miyakoSelectionDone = false;
+    private List<Card> pendingMiyakoOchiCards = new();
 
 
 
@@ -792,12 +799,12 @@ public class GameManager : MonoBehaviour
 
     private void UpdateButtonVisibility()
     {
-        if (isCpuTurnInProgress && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive())
+        if (isCpuTurnInProgress && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive() && !IsMiyakoOchiSelectionActive())
         {
             SetActionButtonsActive(false);
             return;
         }
-        if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive())
+        if (!isPlayerTurn && !IsTradeSelectionActive() && !IsFreezeSelectionActive() && !IsSuitLockSelectionActive() && !IsMiyakoOchiSelectionActive())
         {
             SetActionButtonsActive(false);
             return;
@@ -843,7 +850,7 @@ public class GameManager : MonoBehaviour
                 return;
             }
 
-            if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
+            if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards || isSelectingMiyakoOchiCards)
             {
                 if (playButton != null)
                 {
@@ -854,6 +861,11 @@ public class GameManager : MonoBehaviour
                     if (isSelectingTradeCards)
                     {
                         int required = Mathf.Min(pendingTradeCardCount, human.Hand.Count);
+                        playButton.interactable = (selectedCount == required);
+                    }
+                    else if (isSelectingMiyakoOchiCards)
+                    {
+                        int required = Mathf.Min(miyakoTradeCount, human.Hand.Count);
                         playButton.interactable = (selectedCount == required);
                     }
                     else
@@ -945,6 +957,10 @@ public class GameManager : MonoBehaviour
     private bool IsTradeSelectionActive()
     {
         return isSelectingTradeTarget || isSelectingTradeCards;
+    }
+    private bool IsMiyakoOchiSelectionActive()
+    {
+        return isSelectingMiyakoOchiCards;
     }
 
     private bool IsFreezeSelectionActive()
@@ -1045,7 +1061,7 @@ public class GameManager : MonoBehaviour
 
         List<Card> playableCards;
 
-        if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards)
+        if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards || isSelectingMiyakoOchiCards)
         {
             playableCards = new List<Card>(player.Hand);
         }
@@ -1070,7 +1086,7 @@ public class GameManager : MonoBehaviour
             cv.backSprite = cardBackSprite;
             cv.SetCard(card);
 
-            bool canPlay = playableCards.Contains(card);
+            bool canPlay = isSelectingMiyakoOchiCards || playableCards.Contains(card);
             cv.SetPlayable(canPlay);
         }
     }
@@ -1180,6 +1196,12 @@ public class GameManager : MonoBehaviour
         if (isSelectingTradeTarget)
         {
             ConfirmTradeTargetSelection();
+            return;
+        }
+
+        if (isSelectingMiyakoOchiCards)
+        {
+            HandleMiyakoOchiSelection();
             return;
         }
 
@@ -3703,6 +3725,204 @@ public class GameManager : MonoBehaviour
             if (isGameOver) break;
         }
     }
+    private IEnumerator ApplyMiyakoOchiTrade()
+    {
+        if (!enableMiyakoOchi)
+        {
+            yield break;
+        }
+
+        if (currentGameCount <= 1)
+        {
+            yield break;
+        }
+
+        if (previousRoundRanks.Count == 0)
+        {
+            Debug.Log("都落ち: 前回順位がないためスキップします。");
+            yield break;
+        }
+
+        var daifugo = GetPlayerByPreviousRank(1);
+        var fugo = GetPlayerByPreviousRank(2);
+        var hinmin = GetPlayerByPreviousRank(3);
+        var daihinmin = GetPlayerByPreviousRank(4);
+
+        if (daifugo == null || fugo == null || hinmin == null || daihinmin == null)
+        {
+            Debug.LogWarning("都落ち: 対象プレイヤーが不足しているためスキップします。");
+            yield break;
+        }
+
+        int topBottomCount = Mathf.Min(2, daifugo.Hand.Count, daihinmin.Hand.Count);
+        if (topBottomCount > 0)
+        {
+            List<Card> daifugoGive;
+            if (daifugo is HumanPlayer)
+            {
+                yield return StartCoroutine(SelectMiyakoOchiCards(daifugo, daihinmin, topBottomCount));
+                daifugoGive = new List<Card>(pendingMiyakoOchiCards);
+                pendingMiyakoOchiCards.Clear();
+            }
+            else
+            {
+                daifugoGive = SelectWeakestCards(daifugo, topBottomCount);
+            }
+            var daihinminGive = SelectStrongestCards(daihinmin, topBottomCount);
+            ExecuteCardTransfer(daifugo, daihinmin, daifugoGive);
+            ExecuteCardTransfer(daihinmin, daifugo, daihinminGive);
+        }
+
+        int middleCount = Mathf.Min(1, fugo.Hand.Count, hinmin.Hand.Count);
+        if (middleCount > 0)
+        {
+            List<Card> fugoGive;
+            if (fugo is HumanPlayer)
+            {
+                yield return StartCoroutine(SelectMiyakoOchiCards(fugo, hinmin, middleCount));
+                fugoGive = new List<Card>(pendingMiyakoOchiCards);
+                pendingMiyakoOchiCards.Clear();
+            }
+            else
+            {
+                fugoGive = SelectWeakestCards(fugo, middleCount);
+            }
+            var hinminGive = SelectStrongestCards(hinmin, middleCount);
+            ExecuteCardTransfer(fugo, hinmin, fugoGive);
+            ExecuteCardTransfer(hinmin, fugo, hinminGive);
+        }
+
+        EnqueueMessage("都落ち発動! 前回順位に応じてカードを交換しました。");
+
+        if (human != null)
+        {
+            CreatePlayerCardSlots(human.Hand.Count);
+            PopulatePlayerHand(human);
+        }
+
+        if (cpuPlayers.Count > 0) PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
+        if (cpuPlayers.Count > 1) PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
+        if (cpuPlayers.Count > 2) PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
+    }
+
+    private IEnumerator SelectMiyakoOchiCards(PlayerBase sourcePlayer, PlayerBase targetPlayer, int count)
+    {
+        BeginMiyakoOchiSelection(sourcePlayer, targetPlayer, count);
+        while (!miyakoSelectionDone)
+        {
+            yield return null;
+        }
+        EndMiyakoOchiSelection();
+    }
+
+    private void BeginMiyakoOchiSelection(PlayerBase sourcePlayer, PlayerBase targetPlayer, int count)
+    {
+        miyakoTradeCount = Mathf.Min(count, sourcePlayer.Hand.Count);
+        miyakoSelectionDone = false;
+        isSelectingMiyakoOchiCards = true;
+        pendingMiyakoOchiCards.Clear();
+
+        string targetName = targetPlayer != null ? targetPlayer.Name : "相手";
+        string message = $"{targetName}に渡すカードを\n<size=120%>{miyakoTradeCount}枚</size>\n選んでください";
+        ShowMessageText(passMessageText, message);
+
+        ResetPlayerSelection();
+        CreatePlayerCardSlots(human.Hand.Count);
+        PopulatePlayerHand(human);
+
+        if (passButton != null)
+        {
+            passButton.gameObject.SetActive(false);
+            passButton.interactable = false;
+        }
+        if (playButton != null)
+        {
+            playButton.gameObject.SetActive(true);
+            playButton.interactable = false;
+            playButton.GetComponentInChildren<TextMeshProUGUI>().text = "交換";
+        }
+        if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+    }
+
+    private void HandleMiyakoOchiSelection()
+    {
+        var selected = human.SelectCards(human.Hand);
+        int required = Mathf.Min(miyakoTradeCount, human.Hand.Count);
+
+        if (selected.Count != required)
+        {
+            ShowMessageText(passMessageText, $"{required}枚 選んでください");
+            return;
+        }
+
+        pendingMiyakoOchiCards = selected;
+        miyakoSelectionDone = true;
+        isSelectingMiyakoOchiCards = false;
+
+        if (playButton != null) playButton.interactable = false;
+    }
+
+    private void EndMiyakoOchiSelection()
+    {
+        miyakoTradeCount = 0;
+
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+
+        ResetPlayButtonUI();
+    }
+
+    private IEnumerator RunPreparationPhase()
+    {
+        if (!enableMiyakoOchi || currentGameCount <= 1)
+        {
+            yield break;
+        }
+
+        EnqueueMessage("準備フェーズ: 都落ちのカード交換を行います。");
+        yield return new WaitForSeconds(1.0f);
+
+        yield return StartCoroutine(ApplyMiyakoOchiTrade());
+
+        yield return new WaitForSeconds(1.0f);
+        EnqueueMessage("準備フェーズ終了。");
+    }
+
+    private PlayerBase GetPlayerByPreviousRank(int rank)
+    {
+        return previousRoundRanks.FirstOrDefault(entry => entry.Value == rank).Key;
+    }
+
+    private List<Card> SelectStrongestCards(PlayerBase player, int count)
+    {
+        return player.Hand
+            .OrderByDescending(c => GetCardStrength(c.IsJoker() ? 16 : c.Rank))
+            .ThenByDescending(c => c.Rank)
+            .Take(count)
+            .ToList();
+    }
+
+    private List<Card> SelectWeakestCards(PlayerBase player, int count)
+    {
+        return player.Hand
+            .OrderBy(c => GetCardStrength(c.IsJoker() ? 16 : c.Rank))
+            .ThenBy(c => c.Rank)
+            .Take(count)
+            .ToList();
+    }
+
+    private void ExecuteCardTransfer(PlayerBase fromPlayer, PlayerBase toPlayer, List<Card> cards)
+    {
+        foreach (var card in cards)
+        {
+            fromPlayer.Hand.Remove(card);
+            toPlayer.Hand.Add(card);
+        }
+    }
+
     private bool TryConsumeBarrierForTwelvePenaltyTarget(PlayerBase target)
     {
         return TryConsumeBarrier(target, "12ペナルティ");
@@ -3826,6 +4046,8 @@ public class GameManager : MonoBehaviour
 
         foreach (var p in players) p.Hand.Clear();
         DealInitialCards();
+
+        yield return StartCoroutine(RunPreparationPhase());
 
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
