@@ -188,6 +188,7 @@ public class GameManager : MonoBehaviour
     private int miyakoTradeCount = 0;
     private bool miyakoSelectionDone = false;
     private List<Card> pendingMiyakoOchiCards = new();
+    private PlayerBase clubThreeHolderBeforeTrade = null;
 
 
 
@@ -696,6 +697,7 @@ public class GameManager : MonoBehaviour
 
         remainingPlayers = new List<PlayerBase>(players);
         currentGameCount = 1;
+        currentTurnIndex = GetStartIndexFromPlayer(FindClubThreeHolder());
         AssignRankTextReferences();
         InitializeDebugPreviousRanks();
         UpdateCpuHeaderText();
@@ -4128,6 +4130,7 @@ public class GameManager : MonoBehaviour
         isGameOver = false;
         isRevolution = false;
         isTempRevolution = false;
+        isCpuTurnInProgress = false;
         currentRank = 1;
         gameRanks.Clear();
         passCount = 0;
@@ -4141,16 +4144,38 @@ public class GameManager : MonoBehaviour
 
         foreach (var p in players) p.Hand.Clear();
         DealInitialCards();
+        clubThreeHolderBeforeTrade = FindClubThreeHolder();
 
         yield return StartCoroutine(RunPreparationPhase());
 
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
 
-        currentTurnIndex = 0;
+        currentTurnIndex = GetStartIndexFromPlayer(clubThreeHolderBeforeTrade);
 
         yield return new WaitForSeconds(1.0f);
         StartTurn();
+    }
+    private PlayerBase FindClubThreeHolder()
+    {
+        if (players == null)
+        {
+            return null;
+        }
+
+        return players.FirstOrDefault(player =>
+            player.Hand.Any(card => card.Suit == Suit.Club && card.Rank == 3));
+    }
+
+    private int GetStartIndexFromPlayer(PlayerBase starter)
+    {
+        if (players == null || starter == null)
+        {
+            return 0;
+        }
+
+        int index = players.IndexOf(starter);
+        return index >= 0 ? index : 0;
     }
 
 }
