@@ -3275,7 +3275,7 @@ public class GameManager : MonoBehaviour
         }
 
         isPlayerActionInProgress = false;
-        pendingFreezeTwelveCount = count;
+        pendingFreezeTwelveCount = Mathf.Min(count, freezeTargetCandidates.Count);
         freezeTargetIndex = 0;
         isFreezeTwelveMode = true;
 
@@ -3311,13 +3311,19 @@ public class GameManager : MonoBehaviour
         {
             AddFreezePass(target, 1);
         }
+        freezeTargetCandidates.Remove(target);
         pendingFreezeTwelveCount--;
 
-        if (pendingFreezeTwelveCount <= 0)
+        if (pendingFreezeTwelveCount <= 0 || freezeTargetCandidates.Count == 0)
         {
             EndFreezeTwelveMode();
             EndTurn();
             return;
+        }
+
+        if (freezeTargetIndex >= freezeTargetCandidates.Count)
+        {
+            freezeTargetIndex = 0;
         }
 
         UpdateFreezeTargetMessage();
@@ -3371,15 +3377,16 @@ public class GameManager : MonoBehaviour
         var targets = GetFreezeTargetCandidates(sourcePlayer);
         if (targets.Count == 0) return;
 
-        for (int i = 0; i < count; i++)
+        int applyCount = Mathf.Min(count, targets.Count);
+        for (int i = 0; i < applyCount; i++)
         {
-            var target = targets[i % targets.Count];
+            var target = targets[i];
             if (!TryConsumeBarrierForFreezeTarget(target))
             {
                 AddFreezePass(target, 1);
             }
         }
-        EnqueueMessage($"フリーズ THE 12: {count}人をパス状態にしました。");
+        EnqueueMessage($"フリーズ THE 12: {applyCount}人をパス状態にしました。");
     }
 
     private void AddFreezePass(PlayerBase target, int count)
