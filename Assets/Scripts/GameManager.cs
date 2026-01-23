@@ -387,6 +387,14 @@ public class GameManager : MonoBehaviour
                 HandlePass();
                 yield break;
             }
+            if (!IsValidPlay(cpu.Hand, playableCards, lastPlayedCards))
+            {
+                Debug.LogWarning($"{cpu.Name} の出し手が無効と判断されたためパスします。");
+                EnqueueMessage($"{cpu.Name} はパスしました");
+                yield return new WaitForSeconds(0.8f);
+                HandlePass();
+                yield break;
+            }
 
             foreach (var c in playableCards) cpu.Hand.Remove(c);
 
