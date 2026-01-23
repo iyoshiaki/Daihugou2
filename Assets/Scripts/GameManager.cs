@@ -34,6 +34,10 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     [Tooltip("第2戦以降に都落ち（前回順位に応じたカード交換）を実施する")]
     private bool enableMiyakoOchi = true;
+    [SerializeField]
+    [Tooltip("第2戦以降、前回大富豪が1位を取れないと大貧民へ降格する")]
+    private bool enableMiyakoOchiDemotion = true;
+
 
     // 4回戦の設定
     private const int TotalGames = 4;
@@ -3961,6 +3965,13 @@ public class GameManager : MonoBehaviour
             remainingPlayers.Remove(player);
             freezePassCounts.Remove(player);
 
+            ForceMiyakoOchiDaihinmin(player);
+
+            if (isGameOver)
+            {
+                return;
+            }
+
             if (remainingPlayers.Count <= 1)
             {
                 var lastPlayer = remainingPlayers[0];
@@ -4025,6 +4036,90 @@ public class GameManager : MonoBehaviour
         else
         {
             EnqueueMessage("全4戦終了!お疲れ様でした!");
+        }
+    }
+
+    private void ForceMiyakoOchiDaihinmin(PlayerBase winner)
+    {
+        if (!enableMiyakoOchiDemotion || currentGameCount < 2)
+        {
+            return;
+        }
+
+        if (previousRoundRanks.Count == 0)
+        {
+            return;
+        }
+
+        if (gameRanks.Count != 1 || currentRank != 2)
+        {
+            return;
+        }
+
+        var previousDaifugo = GetPlayerByPreviousRank(1);
+        if (previousDaifugo == null)
+        {
+            return;
+        }
+
+        if (winner != null && winner == previousDaifugo)
+        {
+            return;
+        }
+
+        if (gameRanks.TryGetValue(previousDaifugo, out _))
+        {
+            return;
+        }
+
+        if (!remainingPlayers.Contains(previousDaifugo))
+        {
+            return;
+        }
+
+        gameRanks[previousDaifugo] = 4;
+        previousDaifugo.Hand.Clear();
+        remainingPlayers.Remove(previousDaifugo);
+        freezePassCounts.Remove(previousDaifugo);
+        UpdateDemotedPlayerHand(previousDaifugo);
+        EnqueueMessage("都落ち発動! 前回大富豪が大貧民確定となりました。");
+
+        if (remainingPlayers.Count == 1)
+        {
+            var lastPlayer = remainingPlayers[0];
+            gameRanks[lastPlayer] = currentRank;
+            EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
+
+            isGameOver = true;
+            StartCoroutine(EndGameRoutine());
+        }
+        else if (remainingPlayers.Count == 0)
+        {
+            isGameOver = true;
+            StartCoroutine(EndGameRoutine());
+        }
+    }
+
+    private void UpdateDemotedPlayerHand(PlayerBase demotedPlayer)
+    {
+        if (demotedPlayer == human)
+        {
+            PopulatePlayerHand(human);
+            return;
+        }
+
+        var cpuIndex = cpuPlayers.IndexOf(demotedPlayer as CpuPlayer);
+        if (cpuIndex == 0 && handAreaCPU1 != null)
+        {
+            PopulateCpuHandAsBack(handAreaCPU1, demotedPlayer.Hand.Count);
+        }
+        else if (cpuIndex == 1 && handAreaCPU2 != null)
+        {
+            PopulateCpuHandAsBack(handAreaCPU2, demotedPlayer.Hand.Count);
+        }
+        else if (cpuIndex == 2 && handAreaCPU3 != null)
+        {
+            PopulateCpuHandAsBack(handAreaCPU3, demotedPlayer.Hand.Count);
         }
     }
 
