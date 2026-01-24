@@ -29,7 +29,7 @@ public class GameManager : MonoBehaviour
     private bool isGameOver = false; // ゲーム（1ラウンド）終了フラグ
 
     [Header("Rule Settings")]
-    [Tooltip("7渡しや10捨てのような特殊アクションの結果としてあがることを禁止する")]
+    [Tooltip("2/革命時の3、ジョーカー、8切り、スペード3、7渡し/10捨ての結果としてあがることを禁止する")]
     private bool forbidSpecialWin = false; // 初期値はOFF（許可）
     [SerializeField]
     [Tooltip("第2戦以降に都落ち（前回順位に応じたカード交換）を実施する")]
@@ -44,6 +44,8 @@ public class GameManager : MonoBehaviour
     private bool enableJokerStop = true;
     private bool enableFourStop = true;
     private bool enableSixStop = true;
+    private bool enableEightCut = true;
+
 
 
     // 4回戦の設定
@@ -741,6 +743,7 @@ public class GameManager : MonoBehaviour
         enableJokerStop = SoloRuleSettings.GetRuleEnabled("JokerStop");
         enableFourStop = SoloRuleSettings.GetRuleEnabled("FourStop");
         enableSixStop = SoloRuleSettings.GetRuleEnabled("SixStop");
+        enableEightCut = SoloRuleSettings.GetRuleEnabled("EightCut");
 
         forbidSpecialWin = SoloRuleSettings.GetRuleEnabled("ForbidSpecialWin");
         enableMiyakoOchi = SoloRuleSettings.GetRuleEnabled("MiyakoOchi");
@@ -778,6 +781,7 @@ public class GameManager : MonoBehaviour
         enableJokerStop = true;
         enableFourStop = true;
         enableSixStop = true;
+        enableEightCut = true;
         forbidSpecialWin = false;
         enableMiyakoOchi = true;
         enableMiyakoOchiDemotion = true;
@@ -1912,8 +1916,6 @@ public class GameManager : MonoBehaviour
             foreach (var c in played) human.Hand.Remove(c);
             RemovePlayedCardsFromUI(played);
         }
-        CheckForWin(currentPlayer);
-        if (isGameOver) yield break;
 
         lastPlayedCards = new List<Card>(played);
         lastPlayedPlayerIndex = players.IndexOf(currentPlayer);
@@ -1940,6 +1942,17 @@ public class GameManager : MonoBehaviour
 
         if (enableSpade3Return && isSpade3Counter)
         {
+            var winContext = new WinContext
+            {
+                HasPlayContext = true,
+                PlayedCards = new List<Card>(played),
+                IsEightCut = enableEightCut && (IsEightCut(played)),
+                IsSevenPass = false,
+                IsTenDiscard = false
+            };
+            CheckForWin(currentPlayer, winContext);
+            if (isGameOver) yield break;
+
             EnqueueMessage("スペード3返し!場が流れます。");
             // ★修正: 強制流しの前に一時的な革命状態をリセット
             isTempRevolution = false;
@@ -1970,6 +1983,21 @@ public class GameManager : MonoBehaviour
                     if (state.IsElevenSilence) break;
                 }
             }
+        }
+
+        bool shouldDeferWinCheck = state.SevenPassCount > 0 || state.TenDiscardCount > 0;
+        if (!shouldDeferWinCheck)
+        {
+            var winContext = new WinContext
+            {
+                HasPlayContext = true,
+                PlayedCards = new List<Card>(played),
+                IsEightCut = enableEightCut && (state.IsEightCut || IsEightCut(played)),
+                IsSevenPass = false,
+                IsTenDiscard = false
+            };
+            CheckForWin(currentPlayer, winContext);
+            if (isGameOver) yield break;
         }
 
         bool fourStopTriggered = false;
@@ -3841,15 +3869,16 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
-        if (forbidSpecialWin && fromPlayer.Hand.Count == 0)
+        var winContext = new WinContext
         {
-            EnqueueMessage("🚫 ルールにより、特殊ルール（7渡し）でのあがりは禁止されています!");
-        }
-        else
-        {
-            CheckForWin(fromPlayer);
-            if (isGameOver) yield break;
-        }
+            HasPlayContext = false,
+            PlayedCards = null,
+            IsEightCut = false,
+            IsSevenPass = cards.Count > 0,
+            IsTenDiscard = false
+        };
+        CheckForWin(fromPlayer, winContext);
+        if (isGameOver) yield break;
 
         isSevenPassMode = false;
 
@@ -3910,6 +3939,15 @@ public class GameManager : MonoBehaviour
         {
             return true;
         }
+        var winContext = new WinContext
+        {
+            HasPlayContext = true,
+            PlayedCards = new List<Card>(lastPlayedCards),
+            IsEightCut = enableEightCut && IsEightCut(lastPlayedCards),
+            IsSevenPass = false,
+            IsTenDiscard = false
+        };
+        CheckForWin(fromPlayer, winContext);
         EndTurn();
         return true;
     }
@@ -3935,15 +3973,16 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
-        if (forbidSpecialWin && player.Hand.Count == 0)
+        var winContext = new WinContext
         {
-            EnqueueMessage("🚫 ルールにより、特殊ルール（10捨て）でのあがりは禁止されています!");
-        }
-        else
-        {
-            CheckForWin(player);
-            if (isGameOver) yield break;
-        }
+            HasPlayContext = false,
+            PlayedCards = null,
+            IsEightCut = false,
+            IsSevenPass = false,
+            IsTenDiscard = cards.Count > 0
+        };
+        CheckForWin(player, winContext);
+        if (isGameOver) yield break;
 
         isTenDiscardMode = false;
 
@@ -4240,10 +4279,156 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void CheckForWin(PlayerBase player)
+    private struct WinContext
+    {
+        public bool HasPlayContext;
+        public List<Card> PlayedCards;
+        public bool IsEightCut;
+        public bool IsSevenPass;
+        public bool IsTenDiscard;
+    }
+
+    private bool IsForbiddenStrongestPlay(List<Card> playedCards)
+    {
+        if (playedCards == null || playedCards.Count == 0) return false;
+        if (!IsRevolutionActive && playedCards.Any(card => card.Rank == 15)) return true;
+        return IsRevolutionActive && playedCards.Any(card => card.Rank == 3);
+    }
+
+    private bool TryGetForbiddenWinReason(WinContext context, out string reason)
+    {
+        var reasons = new List<string>();
+
+        if (context.IsSevenPass) reasons.Add("7渡し");
+        if (context.IsTenDiscard) reasons.Add("10捨て");
+
+        if (context.HasPlayContext && context.PlayedCards != null)
+        {
+            if (IsForbiddenStrongestPlay(context.PlayedCards))
+            {
+                reasons.Add("最強カード(2/革命時の3)");
+            }
+            if (context.PlayedCards.Any(card => card.IsJoker()))
+            {
+                reasons.Add("ジョーカー");
+            }
+            if (context.IsEightCut)
+            {
+                reasons.Add("8切り");
+            }
+            if (context.PlayedCards.Any(card => card.Suit == Suit.Spade && card.Rank == 3))
+            {
+                reasons.Add("スペード3");
+            }
+        }
+
+        if (reasons.Count == 0)
+        {
+            reason = null;
+            return false;
+        }
+
+        reason = string.Join("・", reasons);
+        return true;
+    }
+
+    private bool TryApplyForbiddenWin(PlayerBase player, WinContext context)
+    {
+        if (!forbidSpecialWin || player.Hand.Count != 0)
+        {
+            return false;
+        }
+
+        if (!TryGetForbiddenWinReason(context, out var reason))
+        {
+            return false;
+        }
+
+        int lowestRank = GetLowestAvailableForbiddenRank();
+        gameRanks[player] = lowestRank;
+        EnqueueMessage($"🚫 禁止上がり: {player.Name} は{reason}であがったため{lowestRank}位になります。");
+
+        remainingPlayers.Remove(player);
+        freezePassCounts.Remove(player);
+
+        if (remainingPlayers.Count <= 0)
+        {
+            isGameOver = true;
+            StartCoroutine(EndGameRoutine());
+            return true;
+        }
+
+        if (remainingPlayers.Count == 1)
+        {
+            var lastPlayer = remainingPlayers[0];
+            gameRanks[lastPlayer] = currentRank;
+            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
+            isGameOver = true;
+            StartCoroutine(EndGameRoutine());
+        }
+
+        return true;
+    }
+
+    private int GetLowestAvailableForbiddenRank()
+    {
+        int startRank = currentRank;
+        int endRank = currentRank + remainingPlayers.Count - 1;
+        var usedRanks = new HashSet<int>(gameRanks.Values);
+        for (int rank = endRank; rank >= startRank; rank--)
+        {
+            if (IsRankReservedForMiyakoOchi(rank)) continue;
+            if (usedRanks.Contains(rank)) continue;
+            return rank;
+        }
+        return endRank;
+    }
+
+    private bool IsRankReservedForMiyakoOchi(int rank)
+    {
+        if (rank != 4) return false;
+        return IsMiyakoOchiDemotionPending();
+    }
+
+    private bool IsMiyakoOchiDemotionPending()
+    {
+        if (!enableMiyakoOchiDemotion || currentGameCount < 2)
+        {
+            return false;
+        }
+
+        if (previousRoundRanks.Count == 0)
+        {
+            return false;
+        }
+
+        if (currentRank != 1)
+        {
+            return false;
+        }
+
+        var previousDaifugo = GetPlayerByPreviousRank(1);
+        if (previousDaifugo == null)
+        {
+            return false;
+        }
+
+        if (gameRanks.TryGetValue(previousDaifugo, out _))
+        {
+            return false;
+        }
+
+        return remainingPlayers.Contains(previousDaifugo);
+    }
+
+    private void CheckForWin(PlayerBase player, WinContext context = default)
     {
         if (player.Hand.Count == 0)
         {
+            if (TryApplyForbiddenWin(player, context))
+            {
+                return;
+            }
             gameRanks[player] = currentRank;
             EnqueueMessage($"{player.Name} があがりました! ({currentRank}位)");
 
@@ -4262,7 +4447,7 @@ public class GameManager : MonoBehaviour
             {
                 var lastPlayer = remainingPlayers[0];
                 gameRanks[lastPlayer] = currentRank;
-                EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
+                EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
 
                 isGameOver = true;
                 StartCoroutine(EndGameRoutine());
@@ -4337,7 +4522,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        if (gameRanks.Count != 1 || currentRank != 2)
+        if (currentRank != 2)
         {
             return;
         }
@@ -4349,6 +4534,11 @@ public class GameManager : MonoBehaviour
         }
 
         if (winner != null && winner == previousDaifugo)
+        {
+            return;
+        }
+
+        if (winner == null || !gameRanks.TryGetValue(winner, out var winnerRank) || winnerRank != 1)
         {
             return;
         }
@@ -4374,7 +4564,7 @@ public class GameManager : MonoBehaviour
         {
             var lastPlayer = remainingPlayers[0];
             gameRanks[lastPlayer] = currentRank;
-            EnqueueMessage($"{lastPlayer.Name} が大貧民確定です。");
+            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
 
             isGameOver = true;
             StartCoroutine(EndGameRoutine());
