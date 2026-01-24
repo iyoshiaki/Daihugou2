@@ -1781,8 +1781,6 @@ public class GameManager : MonoBehaviour
 
     private void OnPassButton()
     {
-        if (isPlayerActionInProgress) return;
-        if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
             CycleSuitLockSelection();
@@ -1798,8 +1796,11 @@ public class GameManager : MonoBehaviour
             CycleFreezeTargetSelection();
             return;
         }
+        if (isPlayerActionInProgress) return;
         if (players[currentTurnIndex] != humanPlayer) return;
+        if (!TryLockPlayerAction()) return;
         isPlayerActionInProgress = true;
+        if (passButton != null) passButton.interactable = false;
         HandlePass();
     }
 
@@ -2249,6 +2250,7 @@ public class GameManager : MonoBehaviour
             {
                 EnqueueMessage("9フォース中は出せるカードがある限りパスできません。");
                 isPlayerActionInProgress = false;
+                if (passButton != null) passButton.interactable = true;
                 return;
             }
         }
