@@ -37,6 +37,13 @@ public class GameManager : MonoBehaviour
     [SerializeField]
     [Tooltip("第2戦以降、前回大富豪が1位を取れないと大貧民へ降格する")]
     private bool enableMiyakoOchiDemotion = true;
+    private bool enableBind = true;
+    private bool enableStair = true;
+    private bool enableSpade3Return = true;
+    private bool enableSuitLock = true;
+    private bool enableJokerStop = true;
+    private bool enableFourStop = true;
+    private bool enableSixStop = true;
 
 
     // 4回戦の設定
@@ -591,6 +598,7 @@ public class GameManager : MonoBehaviour
 
     private List<List<Card>> FindStairSequences(List<Card> hand)
     {
+        if (!enableStair) return new List<List<Card>>();
         List<List<Card>> stairs = new();
         var suits = hand.GroupBy(c => c.Suit);
 
@@ -626,6 +634,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsStair(List<Card> cards)
     {
+        if (!enableStair) return false;
         if (cards == null || cards.Count < 3) return false;
 
         var suit = cards[0].Suit;
@@ -650,6 +659,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsJokerStopTrigger(List<Card> played)
     {
+        if (!enableJokerStop) return false;
         if (played == null || played.Count != 3) return false;
         if (played.Any(c => c.IsJoker())) return false;
         if (played.Select(c => c.Suit).Distinct().Count() != 1) return false;
@@ -709,6 +719,69 @@ public class GameManager : MonoBehaviour
         UpdateCpuHeaderText();
         UpdatePreviousRankText();
 
+        ApplySoloRuleSettings();
+
+        StartTurn();
+    }
+
+    private void ApplySoloRuleSettings()
+    {
+        if (!SoloRuleSettings.IsSoloModeActive)
+        {
+            ApplyDefaultRuleSettings();
+            return;
+        }
+
+        rules.Clear();
+
+        enableBind = SoloRuleSettings.GetRuleEnabled("Bind");
+        enableStair = SoloRuleSettings.GetRuleEnabled("Stair");
+        enableSpade3Return = SoloRuleSettings.GetRuleEnabled("Spade3Return");
+        enableSuitLock = SoloRuleSettings.GetRuleEnabled("SuitLock");
+        enableJokerStop = SoloRuleSettings.GetRuleEnabled("JokerStop");
+        enableFourStop = SoloRuleSettings.GetRuleEnabled("FourStop");
+        enableSixStop = SoloRuleSettings.GetRuleEnabled("SixStop");
+
+        forbidSpecialWin = SoloRuleSettings.GetRuleEnabled("ForbidSpecialWin");
+        enableMiyakoOchi = SoloRuleSettings.GetRuleEnabled("MiyakoOchi");
+        enableMiyakoOchiDemotion = enableMiyakoOchi;
+
+        if (SoloRuleSettings.GetRuleEnabled("ElevenSilence")) rules.Add(new ElevenSilenceRule());
+        if (SoloRuleSettings.GetRuleEnabled("EightCut")) rules.Add(new EightCutRule());
+        if (SoloRuleSettings.GetRuleEnabled("Revolution")) rules.Add(new RevolutionRule());
+        if (SoloRuleSettings.GetRuleEnabled("ElevenBack")) rules.Add(new ElevenBackRule());
+        if (SoloRuleSettings.GetRuleEnabled("FiveSkip")) rules.Add(new FiveSkipRule());
+        if (SoloRuleSettings.GetRuleEnabled("FourSingle")) rules.Add(new FourSingleRule());
+        if (SoloRuleSettings.GetRuleEnabled("SixTrade")) rules.Add(new SixTradeRule());
+        if (SoloRuleSettings.GetRuleEnabled("SevenPass")) rules.Add(new SevenPassRule());
+        if (SoloRuleSettings.GetRuleEnabled("TenDiscard")) rules.Add(new TenDiscardRule());
+        if (SoloRuleSettings.GetRuleEnabled("GreatChaos")) rules.Add(new GreatChaosRule());
+        if (SoloRuleSettings.GetRuleEnabled("NineForce")) rules.Add(new NineForceRule());
+        if (SoloRuleSettings.GetRuleEnabled("Barrier")) rules.Add(new BarrierRule());
+        if (SoloRuleSettings.GetRuleEnabled("FreezeTwelve")) rules.Add(new FreezeTwelveRule());
+        if (SoloRuleSettings.GetRuleEnabled("TwelvePenalty")) rules.Add(new TwelvePenaltyRule());
+
+        if (!enableJokerStop)
+        {
+            jokerStopTurnsRemaining = 0;
+        }
+    }
+
+    private void ApplyDefaultRuleSettings()
+    {
+        rules.Clear();
+
+        enableBind = true;
+        enableStair = true;
+        enableSpade3Return = true;
+        enableSuitLock = true;
+        enableJokerStop = true;
+        enableFourStop = true;
+        enableSixStop = true;
+        forbidSpecialWin = false;
+        enableMiyakoOchi = true;
+        enableMiyakoOchiDemotion = true;
+
         rules.Add(new ElevenSilenceRule());
         rules.Add(new EightCutRule());
         rules.Add(new RevolutionRule());
@@ -724,7 +797,6 @@ public class GameManager : MonoBehaviour
         rules.Add(new FreezeTwelveRule());
         rules.Add(new TwelvePenaltyRule());
 
-        StartTurn();
     }
 
     private void UpdateCpuHeaderText()
@@ -1546,7 +1618,7 @@ public class GameManager : MonoBehaviour
             bool isSpade3Counter = false;
             // ★追加: スペードの3はジョーカー単体出しに勝てるルール
             // 場がジョーカー1枚の場合のみ
-            if (field.Count == 1 && field[0].IsJoker())
+            if (enableSpade3Return && field.Count == 1 && field[0].IsJoker())
             {
                 // 自分が出のが「スペード」かつ「Rank3」かつ「1枚」ならOK
                 if (selected.Count == 1 && selected[0].Suit == Suit.Spade && selected[0].Rank == 3)
@@ -1652,6 +1724,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsStairWithJoker(List<Card> realCards, int jokerCount)
     {
+        if (!enableStair) return false;
         int totalCards = realCards.Count + jokerCount;
         // ★修正: 合計枚数を3枚または4枚に制限
         if (totalCards < 3 || totalCards > 4) return false;
@@ -1865,7 +1938,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        if (isSpade3Counter)
+        if (enableSpade3Return && isSpade3Counter)
         {
             EnqueueMessage("スペード3返し!場が流れます。");
             // ★修正: 強制流しの前に一時的な革命状態をリセット
@@ -2413,6 +2486,7 @@ public class GameManager : MonoBehaviour
     }
     private bool IsFourStopWindowEligible(List<Card> effectivePlayed)
     {
+        if (!enableFourStop) return false;
         if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
         if (!effectivePlayed.All(c => c.Rank == 8)) return false;
         return effectivePlayed.Count <= 2;
@@ -2420,6 +2494,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsSixStopWindowEligible(List<Card> effectivePlayed)
     {
+        if (!enableSixStop) return false;
         if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
         if (!effectivePlayed.All(c => c.Rank == 15)) return false;
         return effectivePlayed.Count <= 2;
@@ -2764,6 +2839,11 @@ public class GameManager : MonoBehaviour
 
     private void UpdateBindState(List<Card> previousField, List<Card> currentPlayed)
     {
+        if (!enableBind)
+        {
+            ResetBindState();
+            return;
+        }
         if (IsElevenSilenceActive)
         {
             ResetBindState();
@@ -2814,6 +2894,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsBindSatisfied(List<Card> selected)
     {
+        if (!enableBind) return true;
         if (selected == null || selected.Count == 0) return false;
         if (IsElevenSilenceActive) return IsSuitLockSatisfied(selected);
         if (IsSingleJokerSelection(selected)) return true;
@@ -2908,6 +2989,7 @@ public class GameManager : MonoBehaviour
 
     private bool IsSuitLockTrigger(List<Card> effectivePlayed)
     {
+        if (!enableSuitLock) return false;
         if (effectivePlayed == null || effectivePlayed.Count != 3) return false;
         if (!IsStair(effectivePlayed)) return false;
         var ranks = effectivePlayed.Select(c => c.Rank).OrderBy(r => r).ToList();

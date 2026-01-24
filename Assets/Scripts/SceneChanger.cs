@@ -6,81 +6,92 @@ using UnityEngine.SceneManagement;
 public class SceneChanger : MonoBehaviour
 {
 
-    // 「みんなで遊ぶ」ボタンを押したときに呼ぶ関数
+    // u???V?v{^?????
     public void GoToMinnaDe(string minnade)
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("minnade");
     }
 
-    // 「ルール設定」ボタンを押したときに呼ぶ関数
+    // u[?v{^?????
     public void GoToRulesettings(string Rulesettings)
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("Rulesettings");
     }
 
-    // 「対戦」ボタンを押したときに呼ぶ関数
+    // u?v{^?????
     public void GoTomodesentaku(string modesentaku)
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("modesentaku");
     }
 
-    // モード選択画面、ルール設定画面の「戻る」ボタンを押したときに呼ぶ関数
+    // [hI?A[???u?v{^?????
     public void BackTotitle()
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("title");
     }
 
-    // みんなで画面の「戻る」ボタンを押したときに呼ぶ関数
+    // ?????u?v{^?????
     public void BackTomodesentaku()
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("modesentaku");
     }
 
-    // オリジナルルールボタンを押したときに呼ぶ関数
+    // IWi[{^?????
     public void GoTooriginal()
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("original");
     }
 
-    // 「ひとりで遊ぶ」オリジナルルールボタンを押したときに呼ぶ関数
+    // u???V?vIWi[{^?????
     public void GoToSoloOriginal()
     {
+        SoloRuleSettings.SetSoloMode(true);
         SceneManager.LoadScene("SoloOriginal");
     }
 
-    // みんなで画面の「戻る」ボタンを押したときに呼ぶ関数
+    // ?????u?v{^?????
     public void BackToRulesetteings()
     {
+        SoloRuleSettings.SetSoloMode(false);
         SceneManager.LoadScene("Rulesettings");
     }
 
-    // 「ひとりで遊ぶ」を押したときに呼ぶ関数
+    // u???V?v?????
     public void GoToSoloRule()
     {
+        SoloRuleSettings.SetSoloMode(true);
         SceneManager.LoadScene("SoloRule");
     }
 
-    // 「ひとりで遊ぶ」オリジナルルール戻るを押したときに呼ぶ関数
+    // u???V?vIWi[??????
     public void BackToSoloRule()
     {
+        SoloRuleSettings.SetSoloMode(true);
         SceneManager.LoadScene("SoloRule");
     }
 
-    // 「ひとりで遊ぶ」開始! を押したときに呼ぶ関数
+    // u???V?vJn! ?????
     public void GoToMainScene()
     {
+        SoloRuleSettings.SetSoloMode(true);
         SceneManager.LoadScene("MainScene");
     }
 
     // Start is called before the first frame update
     void Start()
     {
-        
+
     }
 
     // Update is called once per frame
     void Update()
     {
-        
+
     }
 }

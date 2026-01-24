@@ -1,8 +1,5 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-
 
 public class NewBehaviourScript : MonoBehaviour
 {
@@ -11,44 +8,71 @@ public class NewBehaviourScript : MonoBehaviour
 
     private Color originalColor;
     private bool isChanged = false;
+    private string ruleKey;
 
-    // Start is called before the first frame update
     void Start()
     {
-        // 最初の色を保存
+        if (targetButton == null)
+        {
+            targetButton = GetComponent<Button>();
+        }
+
+        if (targetButton == null)
+        {
+            return;
+        }
+
         ColorBlock cb = targetButton.colors;
         originalColor = cb.normalColor;
+
+        if (SoloRuleSettings.TryGetRuleKey(gameObject.name, out ruleKey))
+        {
+            isChanged = SoloRuleSettings.GetRuleEnabled(ruleKey);
+            ApplyColor(isChanged);
+        }
     }
 
     public void ToggleColor()
     {
-        ColorBlock cb = targetButton.colors;
-
-        if (isChanged)
+        if (targetButton == null)
         {
-            // 元の色に戻す
-            cb.normalColor = originalColor;
-            cb.highlightedColor = originalColor;
-            cb.pressedColor = originalColor;
-            cb.selectedColor = originalColor;
-            isChanged = false;
+            targetButton = GetComponent<Button>();
+        }
+        if (targetButton == null)
+        {
+            return;
+        }
+
+        if (SoloRuleSettings.TryGetRuleKey(gameObject.name, out var resolvedKey))
+        {
+            ruleKey = resolvedKey;
+            isChanged = SoloRuleSettings.ToggleRule(ruleKey);
         }
         else
         {
-            // 色を変更
-            cb.normalColor = changedColor;
-            cb.highlightedColor = changedColor;
-            cb.pressedColor = changedColor;
-            cb.selectedColor = changedColor;
-            isChanged = true;
+            isChanged = !isChanged;
         }
 
+        ApplyColor(isChanged);
+    }
+
+    private void ApplyColor(bool enabled)
+    {
+        if (targetButton == null)
+        {
+            return;
+        }
+
+        var cb = targetButton.colors;
+        var color = enabled ? changedColor : originalColor;
+        cb.normalColor = color;
+        cb.highlightedColor = color;
+        cb.pressedColor = color;
+        cb.selectedColor = color;
         targetButton.colors = cb;
     }
 
-// Update is called once per frame
-void Update()
+    void Update()
     {
-        
     }
 }

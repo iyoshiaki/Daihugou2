@@ -62,6 +62,8 @@ public abstract class PlayerBase
     // ==============================
     private bool IsStair(List<Card> cards)
     {
+        if (SoloRuleSettings.IsSoloModeActive && !SoloRuleSettings.GetRuleEnabled("Stair"))
+            return false;
         if (cards == null || cards.Count < 3)
             return false;
 
