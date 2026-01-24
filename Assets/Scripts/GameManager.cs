@@ -70,9 +70,15 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI cpu3PreviousRankText;
     [SerializeField] private TextMeshProUGUI playerNameText;
     [SerializeField] private TextMeshProUGUI playerPreviousRankText;
+    [SerializeField] private TextMeshProUGUI bindStatusText;
+    [SerializeField] private TextMeshProUGUI ruleEffectText;
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
+    private string lastBindStatusText = "";
+    private string lastRuleEffectText = "";
+    private bool lastBindStatusVisible = false;
+    private bool lastRuleEffectVisible = false;
 
     [SerializeField] private GameObject cardSlotPrefab;
 
@@ -739,14 +745,37 @@ public class GameManager : MonoBehaviour
         AssignTextReference(ref cpu3PreviousRankText, "CPU3PreviousRankText");
         AssignTextReference(ref playerNameText, "PlayerNameText");
         AssignTextReference(ref playerPreviousRankText, "PlayerPreviousRankText");
+        AssignTextReference(ref bindStatusText, "BindStatusText");
+        AssignTextReference(ref ruleEffectText, "RuleEffectText");
     }
 
     private void AssignTextReference(ref TextMeshProUGUI target, string objectName)
     {
         if (target != null) return;
+        target = FindTextByName(objectName);
+    }
+
+    private TextMeshProUGUI FindTextByName(string objectName)
+    {
         var obj = GameObject.Find(objectName);
-        if (obj == null) return;
-        target = obj.GetComponent<TextMeshProUGUI>();
+        if (obj != null)
+        {
+            return obj.GetComponent<TextMeshProUGUI>();
+        }
+
+        foreach (var text in Resources.FindObjectsOfTypeAll<TextMeshProUGUI>())
+        {
+            if (!text.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+            if (text.name == objectName)
+            {
+                return text;
+            }
+        }
+
+        return null;
     }
 
     private void InitializeDebugPreviousRanks()
@@ -801,6 +830,179 @@ public class GameManager : MonoBehaviour
         {
             UpdateButtonVisibility();
         }
+        UpdateBindStatusText();
+        UpdateRuleEffectText();
+    }
+
+    private void UpdateBindStatusText()
+    {
+        if (bindStatusText == null)
+        {
+            return;
+        }
+
+        var bindStatus = GetBindStatusText();
+        var shouldShow = !string.IsNullOrEmpty(bindStatus);
+        var nextText = shouldShow ? $"縛り: {bindStatus}" : "";
+
+        UpdateStatusText(
+            bindStatusText,
+            nextText,
+            shouldShow,
+            ref lastBindStatusText,
+            ref lastBindStatusVisible
+        );
+    }
+
+    private void UpdateRuleEffectText()
+    {
+        if (ruleEffectText == null)
+        {
+            return;
+        }
+
+        var activeRules = GetActiveRuleLabels();
+        var hasRules = activeRules.Count > 0;
+        var nextText = hasRules ? $"発動中: {string.Join(" / ", activeRules)}" : "";
+
+        UpdateStatusText(
+            ruleEffectText,
+            nextText,
+            hasRules,
+            ref lastRuleEffectText,
+            ref lastRuleEffectVisible
+        );
+    }
+
+    private void UpdateStatusText(
+        TextMeshProUGUI target,
+        string nextText,
+        bool shouldShow,
+        ref string cachedText,
+        ref bool cachedVisibility
+    )
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (shouldShow != cachedVisibility)
+        {
+            target.gameObject.SetActive(shouldShow);
+            cachedVisibility = shouldShow;
+        }
+
+        if (nextText != cachedText)
+        {
+            target.text = nextText;
+            cachedText = nextText;
+        }
+    }
+
+    private string GetBindStatusText()
+    {
+        if (!isNumberBindActive && !isSuitBindActive)
+        {
+            return "";
+        }
+
+        string suitMessage = "";
+        if (isSuitBindActive && boundSuits.Count > 0)
+        {
+            suitMessage = string.Join("・", boundSuits.Select(GetSuitLabel));
+        }
+
+        string numberMessage = "";
+        if (isNumberBindActive && expectedNextRank > 0)
+        {
+            numberMessage = GetRankLabel(expectedNextRank);
+        }
+
+        if (isNumberBindActive && isSuitBindActive)
+        {
+            return $"{numberMessage} & {suitMessage}";
+        }
+        if (isNumberBindActive)
+        {
+            return $"{numberMessage} のみ";
+        }
+
+        if (string.IsNullOrEmpty(suitMessage))
+        {
+            return "";
+        }
+
+        return $"{suitMessage} のみ";
+    }
+
+    private List<string> GetActiveRuleLabels()
+    {
+        var labels = new List<string>();
+
+        if (IsRevolutionActive)
+        {
+            labels.Add("革命");
+        }
+        if (isTempRevolution)
+        {
+            labels.Add("11バック");
+        }
+        if (IsElevenSilenceActive)
+        {
+            labels.Add("11静寂");
+        }
+        if (IsJokerStopActive)
+        {
+            labels.Add("ジョーカーストップ");
+        }
+        if (isNineForceActive)
+        {
+            labels.Add("9強制");
+        }
+        if (pendingEightCutCount > 0)
+        {
+            labels.Add("8切り");
+        }
+        if (pendingTwoCount > 0)
+        {
+            labels.Add("2流し");
+        }
+        if (isFourStopWindowActive)
+        {
+            labels.Add("4止め受付");
+        }
+        if (isSixStopWindowActive)
+        {
+            labels.Add("6止め受付");
+        }
+        if (isSevenPassMode)
+        {
+            labels.Add("7渡し");
+        }
+        if (isTenDiscardMode)
+        {
+            labels.Add("10捨て");
+        }
+        if (isSixTradeMode)
+        {
+            labels.Add("6交換");
+        }
+        if (isFreezeTwelveMode)
+        {
+            labels.Add("12凍結");
+        }
+        if (isSuitLockTurnActive && suitLockSuits.Count > 0)
+        {
+            var suitMessage = string.Join("・", suitLockSuits.Select(GetSuitLabel));
+            labels.Add($"スートロック({suitMessage})");
+        }
+        if (isSingleOnlyTurn)
+        {
+            labels.Add("単発のみ");
+        }
+
+        return labels;
     }
 
     private void UpdateButtonVisibility()
