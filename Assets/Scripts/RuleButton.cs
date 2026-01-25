@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -6,9 +7,14 @@ public class NewBehaviourScript : MonoBehaviour
     public Button targetButton;
     public Color changedColor = Color.yellow;
 
+    [SerializeField] private TextMeshProUGUI labelText;
+    [SerializeField] private string labelSuffixOn = "ÅFON";
+    [SerializeField] private string labelSuffixOff = "ÅFOFF";
+
     private Color originalColor;
     private bool isChanged = false;
     private string ruleKey;
+    private string baseLabel;
 
     void Start()
     {
@@ -24,6 +30,16 @@ public class NewBehaviourScript : MonoBehaviour
 
         ColorBlock cb = targetButton.colors;
         originalColor = cb.normalColor;
+
+        if (labelText == null)
+        {
+            labelText = GetComponentInChildren<TextMeshProUGUI>();
+        }
+
+        if (labelText != null)
+        {
+            baseLabel = labelText.text;
+        }
 
         if (SoloRuleSettings.TryGetRuleKey(gameObject.name, out ruleKey))
         {
@@ -70,6 +86,11 @@ public class NewBehaviourScript : MonoBehaviour
         cb.pressedColor = color;
         cb.selectedColor = color;
         targetButton.colors = cb;
+
+        if (labelText != null && !string.IsNullOrEmpty(baseLabel) && ruleKey != "CpuLevel")
+        {
+            labelText.text = baseLabel + (enabled ? labelSuffixOn : labelSuffixOff);
+        }
     }
 
     void Update()

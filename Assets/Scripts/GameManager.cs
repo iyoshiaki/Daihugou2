@@ -145,6 +145,34 @@ public class GameManager : MonoBehaviour
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
     public bool IsJokerStopActiveForPlay => IsJokerStopActive;
     private bool IsElevenSilenceActive => elevenSilenceFieldsRemaining > 0;
+    private enum CpuDifficulty
+    {
+        Normal,
+        Strong,
+        Ultimate
+    }
+
+    private CpuDifficulty cpuDifficulty = CpuDifficulty.Normal;
+
+    private CpuDifficulty GetCpuDifficulty()
+    {
+        if (!SoloRuleSettings.IsSoloModeActive)
+        {
+            return CpuDifficulty.Normal;
+        }
+
+        if (SoloRuleSettings.IsCpuUltimate)
+        {
+            return CpuDifficulty.Ultimate;
+        }
+
+        if (SoloRuleSettings.IsCpuStrong)
+        {
+            return CpuDifficulty.Strong;
+        }
+
+        return CpuDifficulty.Normal;
+    }
 
 
 
@@ -504,14 +532,9 @@ public class GameManager : MonoBehaviour
 
         if (field == null || field.Count == 0)
         {
-            var stairs = FindStairSequences(hand);
-            if (stairs.Count > 0)
-            {
-                var chosen = stairs[Random.Range(0, stairs.Count)];
-                return IsBindSatisfied(chosen) ? chosen : new List<Card>();
-            }
-            var single = new List<Card> { hand.First() };
-            return IsBindSatisfied(single) ? single : new List<Card>();
+            return cpuDifficulty == CpuDifficulty.Ultimate
+                ? SelectUltimateOpeningPlay(hand)
+                : SelectOpeningPlay(cpu, hand);
         }
 
         var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
@@ -531,6 +554,8 @@ public class GameManager : MonoBehaviour
             fieldStrongestRank = fieldRealCards.Count > 0 ? fieldRealCards[0].Rank : 3;
         }
 
+        var fieldStrength = GetCardStrength(fieldStrongestRank);
+
         if (!isFieldStair)
         {
             // ★追加: 相手がジョーカー単体の場合、スペードの3を持っていれば出す
@@ -548,7 +573,6 @@ public class GameManager : MonoBehaviour
             }
 
             // 通常処理
-            var fieldStrength = GetCardStrength(fieldStrongestRank);
 
             // ジョーカー単体の場合、fieldRankはどうなっているか？
             // 実際のロジックでは IsValidPlay 側で Joker = 16 と判定するが、
@@ -556,46 +580,422 @@ public class GameManager : MonoBehaviour
             // JokerのRankが適切に設定されていないと fieldStrength がおかしくなる可能性がある。
             // ただし上の if (IsJoker) ブロックで処理しているので、ここはJoker以外が流れてくる想定。
 
-            var joker = hand.FirstOrDefault(c => c.IsJoker());
-            var candidates = hand
-                .Where(c => !c.IsJoker())
-                .GroupBy(c => c.Rank)
-                .Where(g => GetCardStrength(g.Key) > fieldStrength)
-                .OrderBy(g => GetCardStrength(g.Key)); // 弱い順に出す
+            return cpuDifficulty == CpuDifficulty.Ultimate
+                ? SelectUltimateResponse(hand, field, fieldRealCards, fieldCount, fieldStrength)
+                : SelectRankGroupResponse(hand, fieldCount, fieldStrength);
+        }
+        else
+        {
+            return cpuDifficulty == CpuDifficulty.Ultimate
+                ? SelectUltimateResponse(hand, field, fieldRealCards, fieldCount, fieldStrength)
+                : SelectStairResponse(hand, field, fieldRealCards, fieldCount, fieldStrength);
+        }
+    }
 
-            foreach (var candidateGroup in candidates)
+    private List<Card> SelectOpeningPlay(CpuPlayer cpu, List<Card> hand)
+    {
+        var stairs = FindStairSequences(hand);
+        if (stairs.Count > 0)
+        {
+            var chosen = cpuDifficulty >= CpuDifficulty.Strong
+                ? ChooseStrongOpeningStair(stairs)
+                : stairs[Random.Range(0, stairs.Count)];
+            if (IsBindSatisfied(chosen))
             {
-                var candidateCards = candidateGroup.ToList();
-                if (joker != null)
-                {
-                    candidateCards.Add(joker);
-                }
+                return chosen;
+            }
+        }
 
-                if (candidateCards.Count < fieldCount)
-                {
-                    continue;
-                }
+        if (cpuDifficulty >= CpuDifficulty.Strong)
+        {
+            var groupPlay = ChooseStrongOpeningGroup(hand);
+            if (groupPlay.Count > 0)
+            {
+                return groupPlay;
+            }
+        }
 
-                var combo = FindBindSatisfiedCombo(candidateCards, fieldCount);
+        var single = new List<Card> { hand.First() };
+        return IsBindSatisfied(single) ? single : new List<Card>();
+    }
+
+    private List<Card> ChooseStrongOpeningGroup(List<Card> hand)
+    {
+        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        var groups = hand
+            .Where(c => !c.IsJoker())
+            .GroupBy(c => c.Rank)
+            .Where(g => g.Count() >= 2)
+            .OrderByDescending(g => g.Count())
+            .ThenByDescending(g => GetCardStrength(g.Key));
+
+        foreach (var group in groups)
+        {
+            var candidate = group.ToList();
+            if (joker != null && candidate.Count < 4)
+            {
+                candidate.Add(joker);
+            }
+            for (int count = Mathf.Min(4, candidate.Count); count >= 2; count--)
+            {
+                var combo = FindBindSatisfiedCombo(candidate, count);
                 if (combo.Count > 0)
                 {
                     return combo;
                 }
             }
+        }
 
-            if (joker != null && fieldCount == 1 && GetCardStrength(16) > fieldStrength)
+        return new List<Card>();
+    }
+
+    private List<Card> ChooseStrongOpeningStair(List<List<Card>> stairs)
+    {
+        return stairs
+            .OrderByDescending(seq => seq.Count)
+            .ThenByDescending(seq => GetCardStrength(seq.Max(c => c.Rank)))
+            .First();
+    }
+
+    private List<Card> SelectUltimateOpeningPlay(List<Card> hand)
+    {
+        var candidates = GeneratePlayableCombos(hand, null);
+        if (candidates.Count == 0)
+        {
+            return new List<Card>();
+        }
+
+        return PickBestUltimatePlay(hand, null, candidates);
+    }
+
+    private List<Card> SelectUltimateResponse(List<Card> hand, List<Card> field, List<Card> fieldRealCards, int fieldCount, int fieldStrength)
+    {
+        var candidates = GeneratePlayableCombos(hand, field);
+        if (candidates.Count == 0)
+        {
+            return new List<Card>();
+        }
+
+        return PickBestUltimatePlay(hand, field, candidates);
+    }
+
+    private List<List<Card>> GeneratePlayableCombos(List<Card> hand, List<Card> field)
+    {
+        var playable = new List<List<Card>>();
+        if (hand == null || hand.Count == 0)
+        {
+            return playable;
+        }
+
+        if (IsJokerStopActive)
+        {
+            hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
+        if (hand.Count == 0)
+        {
+            return playable;
+        }
+
+        if (isFourStopWindowActive)
+        {
+            var forced = GetFourStopCards(hand, GetRequiredFourStopCount());
+            if (forced.Count > 0)
             {
-                var singleJoker = new List<Card> { joker };
-                return IsBindSatisfied(singleJoker) ? singleJoker : new List<Card>();
+                playable.Add(forced);
+            }
+            return playable;
+        }
+
+        if (isSixStopWindowActive)
+        {
+            var forced = GetSixStopCards(hand, GetRequiredSixStopCount());
+            if (forced.Count > 0)
+            {
+                playable.Add(forced);
+            }
+            return playable;
+        }
+
+        if (isSingleOnlyTurn && field != null && field.Count > 1)
+        {
+            return playable;
+        }
+
+        var uniqueHand = hand.Distinct().ToList();
+
+        foreach (var card in uniqueHand)
+        {
+            var single = new List<Card> { card };
+            if (IsValidPlay(hand, single, field))
+            {
+                playable.Add(single);
+            }
+        }
+
+        var rankGroups = uniqueHand
+            .Where(c => !c.IsJoker())
+            .GroupBy(c => c.Rank)
+            .ToList();
+
+        foreach (var group in rankGroups)
+        {
+            var cards = group.ToList();
+            var joker = uniqueHand.FirstOrDefault(c => c.IsJoker());
+            if (joker != null)
+            {
+                cards.Add(joker);
             }
 
-            return new List<Card>();
+            for (int count = 2; count <= Mathf.Min(4, cards.Count); count++)
+            {
+                foreach (var combo in EnumerateCombinations(cards, count))
+                {
+                    if (IsValidPlay(hand, combo, field))
+                    {
+                        playable.Add(combo);
+                    }
+                }
+            }
+        }
+
+        var stairs = FindStairSequences(uniqueHand.Where(c => !c.IsJoker()).ToList());
+        foreach (var seq in stairs)
+        {
+            if (IsValidPlay(hand, seq, field))
+            {
+                playable.Add(seq);
+            }
+        }
+
+        return playable;
+    }
+
+    private IEnumerable<List<Card>> EnumerateCombinations(List<Card> cards, int count)
+    {
+        var results = new List<List<Card>>();
+        var buffer = new List<Card>(count);
+
+        void Build(int start)
+        {
+            if (buffer.Count == count)
+            {
+                results.Add(new List<Card>(buffer));
+                return;
+            }
+
+            for (int i = start; i < cards.Count; i++)
+            {
+                buffer.Add(cards[i]);
+                Build(i + 1);
+                buffer.RemoveAt(buffer.Count - 1);
+            }
+        }
+
+        Build(0);
+        return results;
+    }
+
+    private List<Card> PickBestUltimatePlay(List<Card> hand, List<Card> field, List<List<Card>> candidates)
+    {
+        List<Card> best = null;
+        float bestScore = float.NegativeInfinity;
+
+        foreach (var candidate in candidates)
+        {
+            var score = EvaluateUltimatePlay(hand, field, candidate);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        return best ?? new List<Card>();
+    }
+
+    private float EvaluateUltimatePlay(List<Card> hand, List<Card> field, List<Card> play)
+    {
+        var remaining = new List<Card>(hand);
+        foreach (var card in play)
+        {
+            remaining.Remove(card);
+        }
+
+        float score = 0f;
+
+        score -= remaining.Count * 100f;
+        score -= remaining.Count(c => c.IsJoker()) * 15f;
+        score -= remaining.Count(c => c.Rank == 15) * 12f;
+        score -= remaining.Count(c => c.Rank == 14) * 6f;
+
+        score += play.Count * 10f;
+        score += play.Count(c => c.IsJoker()) * 4f;
+
+        if (enableEightCut && IsEightCut(play))
+        {
+            score += 30f;
+        }
+
+        if (field != null && field.Count > 0)
+        {
+            score += GetPlayStrengthDelta(field, play) * 2f;
         }
         else
         {
-            // 階段の処理（省略・既存通り）
+            score += EvaluateOpeningLead(play) * 1.5f;
         }
+
+        score += EvaluateFutureFlexibility(remaining) * 0.8f;
+        return score;
+    }
+
+    private float GetPlayStrengthDelta(List<Card> field, List<Card> play)
+    {
+        int fieldRank = GetFieldStrongestRank(field);
+        int playRank = GetFieldStrongestRank(play);
+        return GetCardStrength(playRank) - GetCardStrength(fieldRank);
+    }
+
+    private int GetFieldStrongestRank(List<Card> cards)
+    {
+        if (cards == null || cards.Count == 0)
+        {
+            return 3;
+        }
+
+        var (realCards, jokerCount) = GetRealCardsAndJokers(cards);
+        if (IsStairWithJoker(realCards, jokerCount))
+        {
+            return GetStairMaxRank(realCards, jokerCount);
+        }
+
+        if (realCards.Count == 0 && jokerCount > 0)
+        {
+            return 16;
+        }
+
+        return realCards.Count > 0 ? realCards[0].Rank : 3;
+    }
+
+    private float EvaluateOpeningLead(List<Card> play)
+    {
+        if (play == null || play.Count == 0)
+        {
+            return 0f;
+        }
+
+        float score = 0f;
+        if (IsStairWithJoker(play.Where(c => !c.IsJoker()).ToList(), play.Count(c => c.IsJoker())))
+        {
+            score += play.Count * 8f;
+        }
+        else if (play.All(c => c.Rank == play[0].Rank))
+        {
+            score += play.Count * 6f;
+        }
+
+        return score;
+    }
+
+    private float EvaluateFutureFlexibility(List<Card> remaining)
+    {
+        if (remaining == null || remaining.Count == 0)
+        {
+            return 100f;
+        }
+
+        var rankGroups = remaining
+            .Where(c => !c.IsJoker())
+            .GroupBy(c => c.Rank)
+            .Select(g => g.Count())
+            .ToList();
+
+        float score = rankGroups.Sum(g => g >= 2 ? 4f : 0f);
+
+        var suits = remaining.Where(c => !c.IsJoker()).GroupBy(c => c.Suit).ToList();
+        foreach (var suit in suits)
+        {
+            if (suit.Count() >= 3)
+            {
+                score += 5f;
+            }
+        }
+
+        return score;
+    }
+
+    private List<Card> SelectRankGroupResponse(List<Card> hand, int fieldCount, int fieldStrength)
+    {
+        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        var candidates = hand
+            .Where(c => !c.IsJoker())
+            .GroupBy(c => c.Rank)
+            .Where(g => GetCardStrength(g.Key) > fieldStrength)
+            .Select(g => new { Rank = g.Key, Cards = g.ToList() })
+            .ToList();
+
+        if (cpuDifficulty >= CpuDifficulty.Strong)
+        {
+            candidates = candidates
+                .OrderByDescending(c => GetCardStrength(c.Rank))
+                .ToList();
+        }
+        else
+        {
+            candidates = candidates
+                .OrderBy(c => GetCardStrength(c.Rank))
+                .ToList();
+        }
+
+        foreach (var candidateGroup in candidates)
+        {
+            var candidateCards = candidateGroup.Cards.ToList();
+            if (joker != null)
+            {
+                candidateCards.Add(joker);
+            }
+
+            if (candidateCards.Count < fieldCount)
+            {
+                continue;
+            }
+
+            var combo = FindBindSatisfiedCombo(candidateCards, fieldCount);
+            if (combo.Count > 0)
+            {
+                return combo;
+            }
+        }
+
+        if (joker != null && fieldCount == 1 && GetCardStrength(16) > fieldStrength)
+        {
+            var singleJoker = new List<Card> { joker };
+            return IsBindSatisfied(singleJoker) ? singleJoker : new List<Card>();
+        }
+
         return new List<Card>();
+    }
+
+    private List<Card> SelectStairResponse(List<Card> hand, List<Card> field, List<Card> fieldRealCards, int fieldCount, int fieldStrength)
+    {
+        Suit? fieldSuit = fieldRealCards.Count > 0 ? fieldRealCards[0].Suit : (Suit?)null;
+        var stairs = FindStairSequences(hand)
+            .Where(seq => seq.Count == fieldCount)
+            .Where(seq => fieldSuit == null || seq[0].Suit == fieldSuit.Value)
+            .Where(seq => GetCardStrength(seq.Max(c => c.Rank)) > fieldStrength)
+            .Where(IsBindSatisfied)
+            .ToList();
+
+        if (stairs.Count == 0)
+        {
+            return new List<Card>();
+        }
+
+        var ordered = cpuDifficulty >= CpuDifficulty.Strong
+            ? stairs.OrderByDescending(seq => GetCardStrength(seq.Max(c => c.Rank)))
+            : stairs.OrderBy(seq => GetCardStrength(seq.Max(c => c.Rank)));
+
+        return ordered.First();
     }
 
     private List<List<Card>> FindStairSequences(List<Card> hand)
@@ -736,6 +1136,8 @@ public class GameManager : MonoBehaviour
 
         rules.Clear();
 
+        cpuDifficulty = GetCpuDifficulty();
+
         enableBind = SoloRuleSettings.GetRuleEnabled("Bind");
         enableStair = SoloRuleSettings.GetRuleEnabled("Stair");
         enableSpade3Return = SoloRuleSettings.GetRuleEnabled("Spade3Return");
@@ -773,6 +1175,8 @@ public class GameManager : MonoBehaviour
     private void ApplyDefaultRuleSettings()
     {
         rules.Clear();
+
+        cpuDifficulty = CpuDifficulty.Normal;
 
         enableBind = true;
         enableStair = true;

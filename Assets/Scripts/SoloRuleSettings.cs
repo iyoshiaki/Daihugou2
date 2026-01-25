@@ -5,6 +5,7 @@ public static class SoloRuleSettings
 {
     private const string KeyPrefix = "SoloRule.";
     private const string SoloModeKey = "SoloRule.Mode";
+    private const string CpuLevelKey = "SoloRule.CpuLevel";
 
     private static readonly Dictionary<string, string> ButtonToKey = new()
     {
@@ -79,20 +80,54 @@ public static class SoloRuleSettings
 
     public static bool GetRuleEnabled(string key)
     {
+        if (key == "CpuLevel")
+        {
+            return GetCpuLevel() > 0;
+        }
         var defaultValue = DefaultStates.TryGetValue(key, out var value) && value;
         return PlayerPrefs.GetInt(KeyPrefix + key, defaultValue ? 1 : 0) == 1;
     }
 
     public static void SetRuleEnabled(string key, bool enabled)
     {
+        if (key == "CpuLevel")
+        {
+            SetCpuLevel(enabled ? 1 : 0);
+            return;
+        }
         PlayerPrefs.SetInt(KeyPrefix + key, enabled ? 1 : 0);
         PlayerPrefs.Save();
     }
 
     public static bool ToggleRule(string key)
     {
+        if (key == "CpuLevel")
+        {
+            return CycleCpuLevel() > 0;
+        }
         var nextValue = !GetRuleEnabled(key);
         SetRuleEnabled(key, nextValue);
         return nextValue;
     }
+    public static int GetCpuLevel()
+    {
+        return PlayerPrefs.GetInt(CpuLevelKey, 0);
+    }
+
+    public static void SetCpuLevel(int level)
+    {
+        var clamped = Mathf.Clamp(level, 0, 2);
+        PlayerPrefs.SetInt(CpuLevelKey, clamped);
+        PlayerPrefs.Save();
+    }
+
+    public static int CycleCpuLevel()
+    {
+        var next = (GetCpuLevel() + 1) % 3;
+        SetCpuLevel(next);
+        return next;
+    }
+
+    public static bool IsCpuStrong => GetCpuLevel() == 1;
+    public static bool IsCpuUltimate => GetCpuLevel() == 2;
 }
