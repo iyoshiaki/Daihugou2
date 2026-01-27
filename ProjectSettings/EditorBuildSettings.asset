@@ -5,7 +5,13 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 0
+  - enabled: 1
+    path: Assets/Scenes/title.unity
+    guid: 0e61fc52fea79e14cb20dcf9014f7365
+  - enabled: 1
+    path: Assets/Scenes/minnade.unity
+    guid: af699a9422b21254fa257890f164b08e
+  - enabled: 1
     path: Assets/Scenes/SampleScene.unity
     guid: 2cda990e2423bbf4892e6590ba056729
   - enabled: 1
@@ -14,12 +20,6 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/modesentaku.unity
     guid: eeb51e2311e5e7d45b5ff623c0a7ff02
-  - enabled: 1
-    path: Assets/Scenes/title.unity
-    guid: 0e61fc52fea79e14cb20dcf9014f7365
-  - enabled: 1
-    path: Assets/Scenes/minnade.unity
-    guid: af699a9422b21254fa257890f164b08e
   - enabled: 1
     path: Assets/Scenes/SoloRule.unity
     guid: 064ccc581347e7f4dba8faf16b7f7afc
