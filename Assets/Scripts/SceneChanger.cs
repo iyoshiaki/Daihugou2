@@ -24,7 +24,7 @@ public class SceneChanger : MonoBehaviour
     public void GoTomodesentaku(string modesentaku)
     {
         SoloRuleSettings.SetSoloMode(false);
-        SceneManager.LoadScene("modesentaku");
+        SceneManager.LoadScene("SoloRule");
     }
 
     // [hI?A[???u?v{^?????
