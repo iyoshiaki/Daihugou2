@@ -1115,7 +1115,7 @@ public class GameManager : MonoBehaviour
 
         remainingPlayers = new List<PlayerBase>(players);
         currentGameCount = 1;
-        currentTurnIndex = GetStartIndexFromPlayer(humanPlayer);
+        currentTurnIndex = GetStartIndexFromPlayer(FindClubThreeHolder());
         AssignRankTextReferences();
         InitializeDebugPreviousRanks();
         UpdateCpuHeaderText();
@@ -5031,7 +5031,7 @@ public class GameManager : MonoBehaviour
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
 
-        currentTurnIndex = GetStartIndexFromPlayer(humanPlayer);
+        currentTurnIndex = GetStartIndexFromPlayer(clubThreeHolderBeforeTrade);
 
         yield return new WaitForSeconds(1.0f);
         StartTurn();
