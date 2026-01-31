@@ -1117,7 +1117,6 @@ public class GameManager : MonoBehaviour
         currentGameCount = 1;
         currentTurnIndex = GetStartIndexFromPlayer(FindClubThreeHolder());
         AssignRankTextReferences();
-        InitializeDebugPreviousRanks();
         UpdateCpuHeaderText();
         UpdatePreviousRankText();
 
@@ -1279,6 +1278,10 @@ public class GameManager : MonoBehaviour
             cpu1PreviousRankText.text = showRanks && cpuPlayers.Count >= 1 && previousRoundRanks.TryGetValue(cpuPlayers[0], out var rank1)
                 ? GetRankDisplayText(rank1)
                 : "";
+            if (showRanks && cpuPlayers.Count >= 1 && previousRoundRanks.TryGetValue(cpuPlayers[0], out rank1))
+            {
+                ApplyPreviousRankColor(cpu1PreviousRankText, rank1);
+            }
         }
         if (cpu2PreviousRankText != null)
         {
@@ -1286,6 +1289,10 @@ public class GameManager : MonoBehaviour
             cpu2PreviousRankText.text = showRanks && cpuPlayers.Count >= 2 && previousRoundRanks.TryGetValue(cpuPlayers[1], out var rank2)
                 ? GetRankDisplayText(rank2)
                 : "";
+            if (showRanks && cpuPlayers.Count >= 2 && previousRoundRanks.TryGetValue(cpuPlayers[1], out rank2))
+            {
+                ApplyPreviousRankColor(cpu2PreviousRankText, rank2);
+            }
         }
         if (cpu3PreviousRankText != null)
         {
@@ -1293,6 +1300,10 @@ public class GameManager : MonoBehaviour
             cpu3PreviousRankText.text = showRanks && cpuPlayers.Count >= 3 && previousRoundRanks.TryGetValue(cpuPlayers[2], out var rank3)
                 ? GetRankDisplayText(rank3)
                 : "";
+            if (showRanks && cpuPlayers.Count >= 3 && previousRoundRanks.TryGetValue(cpuPlayers[2], out rank3))
+            {
+                ApplyPreviousRankColor(cpu3PreviousRankText, rank3);
+            }
         }
         if (playerPreviousRankText != null)
         {
@@ -1300,6 +1311,29 @@ public class GameManager : MonoBehaviour
             playerPreviousRankText.text = showRanks && previousRoundRanks.TryGetValue(humanPlayer, out var playerRank)
                  ? GetRankDisplayText(playerRank)
                 : "";
+            if (showRanks && previousRoundRanks.TryGetValue(humanPlayer, out playerRank))
+            {
+                ApplyPreviousRankColor(playerPreviousRankText, playerRank);
+            }
+        }
+    }
+
+    private void ApplyPreviousRankColor(TextMeshProUGUI text, int rank)
+    {
+        string title = GetRankTitle(rank);
+        switch (title)
+        {
+            case "大富豪":
+            case "富豪":
+                text.color = new Color(1f, 1f, 0f, 1f);
+                break;
+            case "貧民":
+            case "大貧民":
+                text.color = new Color(0.6f, 0.6f, 0.6f, 1f);
+                break;
+            default:
+                text.color = new Color(1f, 1f, 0f, 1f);
+                break;
         }
     }
 
