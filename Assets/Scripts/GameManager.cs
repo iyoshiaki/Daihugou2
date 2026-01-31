@@ -199,11 +199,11 @@ public class GameManager : MonoBehaviour
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
         // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16=Joker
 
-        int power = 0;
-        if (rank == 16) power = 14; // Joker (最強)
-        else if (rank == 15) power = 13; // 2
-        else if (rank == 14) power = 12; // A
-        else power = rank - 3; // 3 => 0, 4 => 1 ... 13(K) => 10
+        int power = GetCardBaseStrength(rank);
+        if (rank == 16)
+        {
+            return power;
+        }
 
         // 革命中なら強さを反転 (大きい値ほど弱いことにする)
         if (IsRevolutionActive)
@@ -211,6 +211,14 @@ public class GameManager : MonoBehaviour
             return -power;
         }
         return power;
+    }
+    // 表示用の強さ (革命でも通常の並び順)
+    private int GetCardBaseStrength(int rank)
+    {
+        if (rank == 16) return 14; // Joker (最強)
+        if (rank == 15) return 13; // 2
+        if (rank == 14) return 12; // A
+        return rank - 3; // 3 => 0, 4 => 1 ... 13(K) => 10
     }
 
     // 現在のカード強さ比較用変数 (5飛ばし等用)
@@ -2047,7 +2055,7 @@ public class GameManager : MonoBehaviour
         }
 
         var displayCards = player.Hand
-            .OrderBy(card => GetCardStrength(card.IsJoker() ? 16 : card.Rank))
+            .OrderBy(card => GetCardBaseStrength(card.IsJoker() ? 16 : card.Rank))
             .ThenBy(card => card.Suit)
             .ToList();
 
