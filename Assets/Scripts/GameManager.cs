@@ -508,6 +508,11 @@ public class GameManager : MonoBehaviour
     {
         var hand = cpu.Hand.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
 
+        if ((field == null || field.Count == 0) && isSuitLockTurnActive && suitLockSuits.Count > 0)
+        {
+            hand = hand.Where(card => card.IsJoker() || suitLockSuits.Contains(card.Suit)).ToList();
+        }
+
         if (IsJokerStopActive)
         {
             hand = hand.Where(c => !c.IsJoker()).ToList();
@@ -1821,7 +1826,8 @@ public class GameManager : MonoBehaviour
             if (passButton != null)
             {
                 bool isFieldEmpty = (lastPlayedCards == null || lastPlayedCards.Count == 0);
-                passButton.gameObject.SetActive(!isFieldEmpty && !suppressPassAfterPlay);
+                bool canPassOnSuitLockLead = isFieldEmpty && CanPassOnSuitLockLead(human);
+                passButton.gameObject.SetActive((!isFieldEmpty || canPassOnSuitLockLead) && !suppressPassAfterPlay);
                 if (!isFieldEmpty)
                 {
                     bool canPass = true;
@@ -1830,6 +1836,10 @@ public class GameManager : MonoBehaviour
                         canPass = !HasValidPlayForNineForce(human.Hand, lastPlayedCards);
                     }
                     passButton.interactable = canPass;
+                }
+                else if (canPassOnSuitLockLead)
+                {
+                    passButton.interactable = true;
                 }
             }
             if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
@@ -2086,18 +2096,28 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        var hands = activePlayers.Select(player => new List<Card>(player.Hand)).ToList();
-
-        for (int i = 0; i < hands.Count; i++)
+        var allCards = new List<Card>();
+        var handCounts = new List<int>();
+        foreach (var player in activePlayers)
         {
-            int rand = Random.Range(i, hands.Count);
-            (hands[i], hands[rand]) = (hands[rand], hands[i]);
+            handCounts.Add(player.Hand.Count);
+            allCards.AddRange(player.Hand);
+            player.Hand.Clear();
+            player.SelectedCards.Clear();
         }
 
+        for (int i = 0; i < allCards.Count; i++)
+        {
+            int rand = Random.Range(i, allCards.Count);
+            (allCards[i], allCards[rand]) = (allCards[rand], allCards[i]);
+        }
+
+        int cardIndex = 0;
         for (int i = 0; i < activePlayers.Count; i++)
         {
-            activePlayers[i].Hand = hands[i];
-            activePlayers[i].SelectedCards.Clear();
+            int count = handCounts[i];
+            activePlayers[i].Hand.AddRange(allCards.Skip(cardIndex).Take(count));
+            cardIndex += count;
         }
 
         if (human != null)
@@ -2935,6 +2955,15 @@ public class GameManager : MonoBehaviour
                 return;
             }
         }
+        if (lastPlayedCards == null || lastPlayedCards.Count == 0)
+        {
+            var currentPlayer = players[currentTurnIndex];
+            if (CanPassOnSuitLockLead(currentPlayer))
+            {
+                EndTurn();
+                return;
+            }
+        }
         passCount++;
 
         // ★修正: 場を流す条件の計算
@@ -3643,6 +3672,14 @@ public class GameManager : MonoBehaviour
         var suitSet = GetBindSuitSet(selected, isStair);
         if (suitSet.Count == 0) return false;
         return suitSet.All(s => suitLockSuits.Contains(s));
+    }
+    private bool CanPassOnSuitLockLead(PlayerBase player)
+    {
+        if (!isSuitLockTurnActive || suitLockSuits.Count == 0) return false;
+        if (lastPlayedCards != null && lastPlayedCards.Count > 0) return false;
+        if (player == null || player.Hand == null || player.Hand.Count == 0) return false;
+        var combos = GeneratePlayableCombos(player.Hand, null);
+        return combos == null || combos.Count == 0;
     }
     private bool IsSingleJokerSelection(List<Card> selected)
     {
