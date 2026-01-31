@@ -911,6 +911,9 @@ MonoBehaviour:
   playerPreviousRankText: {fileID: 2000001072}
   bindStatusText: {fileID: 3000003003}
   ruleEffectText: {fileID: 3000003103}
+  revolutionStatusText: {fileID: 3000003203}
+  backgroundCamera: {fileID: 519420031}
+  revolutionBackgroundColor: {r: 0.6, g: 0.1, b: 0.1, a: 0}
   cardSlotPrefab: {fileID: 5872291462130567036, guid: c97bf99098dab284ab95e5e85c5813f5, type: 3}
 --- !u!4 &1221802525
 Transform:

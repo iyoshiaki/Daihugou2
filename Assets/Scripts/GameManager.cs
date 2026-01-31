@@ -82,6 +82,8 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI bindStatusText;
     [SerializeField] private TextMeshProUGUI ruleEffectText;
     [SerializeField] private TextMeshProUGUI revolutionStatusText;
+    [SerializeField] private Camera backgroundCamera;
+    [SerializeField] private Color revolutionBackgroundColor = new Color(0.6f, 0.1f, 0.1f, 0f);
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
@@ -91,6 +93,9 @@ public class GameManager : MonoBehaviour
     private bool lastRuleEffectVisible = false;
     private string lastRevolutionStatusText = "";
     private bool lastRevolutionStatusVisible = false;
+    private Color defaultBackgroundColor;
+    private bool hasBackgroundCamera = false;
+    private bool lastRevolutionBackground = false;
 
     [SerializeField] private GameObject cardSlotPrefab;
 
@@ -1085,6 +1090,7 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        InitializeBackgroundCamera();
         InitPlayers();
 
         if (cpuPlayers.Count > 0) cpuPlayers[0].handArea = handAreaCPU1;
@@ -1351,6 +1357,7 @@ public class GameManager : MonoBehaviour
         UpdateBindStatusText();
         UpdateRevolutionStatusText();
         UpdateRuleEffectText();
+        UpdateRevolutionBackgroundColor();
     }
 
     private void UpdateBindStatusText()
@@ -1410,7 +1417,46 @@ public class GameManager : MonoBehaviour
             ref lastRevolutionStatusVisible
         );
     }
+    private void InitializeBackgroundCamera()
+    {
+        if (backgroundCamera == null)
+        {
+            backgroundCamera = Camera.main;
+        }
 
+        if (backgroundCamera == null)
+        {
+            return;
+        }
+
+        defaultBackgroundColor = backgroundCamera.backgroundColor;
+        hasBackgroundCamera = true;
+        lastRevolutionBackground = !isRevolution;
+        UpdateRevolutionBackgroundColor();
+    }
+
+    private void UpdateRevolutionBackgroundColor()
+    {
+        if (!hasBackgroundCamera || backgroundCamera == null)
+        {
+            InitializeBackgroundCamera();
+            if (!hasBackgroundCamera || backgroundCamera == null)
+            {
+                return;
+            }
+        }
+
+        var shouldUseRevolutionColor = isRevolution;
+        if (shouldUseRevolutionColor == lastRevolutionBackground)
+        {
+            return;
+        }
+
+        backgroundCamera.backgroundColor = shouldUseRevolutionColor
+            ? revolutionBackgroundColor
+            : defaultBackgroundColor;
+        lastRevolutionBackground = shouldUseRevolutionColor;
+    }
 
     private void UpdateStatusText(
         TextMeshProUGUI target,
