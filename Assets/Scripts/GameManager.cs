@@ -2424,6 +2424,14 @@ public class GameManager : MonoBehaviour
             }
         }
 
+        if (currentPlayer.Hand.Count == 0)
+        {
+            state.SevenPassCount = 0;
+            state.TenDiscardCount = 0;
+            state.SixTradeCount = 0;
+            state.FreezeTwelveCount = 0;
+        }
+
         bool shouldDeferWinCheck = state.SevenPassCount > 0 || state.TenDiscardCount > 0;
         if (!shouldDeferWinCheck)
         {
