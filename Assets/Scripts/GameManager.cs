@@ -4268,8 +4268,7 @@ public class GameManager : MonoBehaviour
         if (toPlayer == null)
         {
             Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
-            isSevenPassMode = false;
-            ResetPlayButtonUI();
+            ResetSevenPassTenDiscardState();
             EndTurn();
             yield break;
         }
@@ -4309,6 +4308,8 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
+        ResetSevenPassTenDiscardState();
+
         var winContext = new WinContext
         {
             HasPlayContext = false,
@@ -4319,13 +4320,6 @@ public class GameManager : MonoBehaviour
         };
         CheckForWin(fromPlayer, winContext);
         if (isGameOver) yield break;
-
-        isSevenPassMode = false;
-
-        passMessageText.gameObject.SetActive(false);
-        passMessageText.text = "";
-
-        ResetPlayButtonUI();
 
         if (TryResolvePendingSuitLockSelection())
         {
@@ -4368,13 +4362,7 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        isSevenPassMode = false;
-        if (passMessageText != null)
-        {
-            passMessageText.gameObject.SetActive(false);
-            passMessageText.text = "";
-        }
-        ResetPlayButtonUI();
+        ResetSevenPassTenDiscardState();
         if (TryResolvePendingSuitLockSelection())
         {
             return true;
@@ -4413,6 +4401,8 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
+        ResetSevenPassTenDiscardState();
+
         var winContext = new WinContext
         {
             HasPlayContext = false,
@@ -4423,13 +4413,6 @@ public class GameManager : MonoBehaviour
         };
         CheckForWin(player, winContext);
         if (isGameOver) yield break;
-
-        isTenDiscardMode = false;
-
-        passMessageText.gameObject.SetActive(false);
-        passMessageText.text = "";
-
-        ResetPlayButtonUI();
 
         if (TryResolvePendingSuitLockSelection())
         {
@@ -4707,6 +4690,55 @@ public class GameManager : MonoBehaviour
         if (passButton != null) passButton.interactable = true;
         SetPassButtonLabel("パス");
         if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
+    }
+    private void ResetSevenPassTenDiscardState()
+    {
+        isSevenPassMode = false;
+        isTenDiscardMode = false;
+        pendingActionCardCount = 0;
+
+        if (passMessageText != null)
+        {
+            passMessageText.gameObject.SetActive(false);
+            passMessageText.text = "";
+        }
+
+        ResetPlayButtonUI();
+    }
+
+    private void ResetRoundRuleState()
+    {
+        ResetSevenPassTenDiscardState();
+        EndSixTradeMode();
+        EndFreezeTwelveMode();
+
+        pendingSkipCount = 0;
+        pendingEightCutCount = 0;
+        pendingTwoCount = 0;
+        jokerStopTurnsRemaining = 0;
+        forceSingleNextTurn = false;
+        isSingleOnlyTurn = false;
+        elevenSilenceFieldsRemaining = 0;
+        isNineForceActive = false;
+
+        isFourStopWindowActive = false;
+        isSixStopWindowActive = false;
+
+        isSuitLockTurnActive = false;
+        suitLockTurnsRemaining = 0;
+        suitLockSuits.Clear();
+        isSelectingSuitLock = false;
+        suitLockSelectionIndex = 0;
+        suitLockSelectableSuits.Clear();
+        pendingSuitLockSelection = false;
+        pendingSuitLockPlayer = null;
+
+        isSelectingTradeTarget = false;
+        isSelectingTradeCards = false;
+        isSelectingTradeSourceCards = false;
+        isSelectingMiyakoOchiCards = false;
+
+        freezePassCounts.Clear();
     }
 
     private void SetPassButtonLabel(string label)
@@ -5045,6 +5077,7 @@ public class GameManager : MonoBehaviour
         isRevolution = false;
         isTempRevolution = false;
         isCpuTurnInProgress = false;
+        ResetRoundRuleState();
         currentRank = 1;
         gameRanks.Clear();
         passCount = 0;
