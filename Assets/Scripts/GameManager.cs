@@ -150,7 +150,7 @@ public class GameManager : MonoBehaviour
     private PlayerBase pendingSuitLockPlayer = null;
 
     [Header("Debug")]
-    [SerializeField] private bool debugForceTenhoChihoHand = true;
+    [SerializeField] private bool debugForceTenhoChihoHand = false;
 
 
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
@@ -1098,6 +1098,7 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
+        debugForceTenhoChihoHand = false;
         InitializeBackgroundCamera();
         InitPlayers();
 
@@ -1958,6 +1959,11 @@ public class GameManager : MonoBehaviour
             deck.RemoveAt(0);
             index++;
         }
+        Shuffle(human.Hand);
+        foreach (var cpu in cpuPlayers)
+        {
+            Shuffle(cpu.Hand);
+        }
 
         PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
         PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
@@ -2024,8 +2030,10 @@ public class GameManager : MonoBehaviour
         foreach (Transform child in handAreaPlayer)
             if (child.GetComponent<CardView>() != null) Destroy(child.gameObject);
 
-        player.Hand.Sort((a, b) => a.Rank.CompareTo(b.Rank));
-
+        if (playerCardSlots.Count != player.Hand.Count)
+        {
+            CreatePlayerCardSlots(player.Hand.Count);
+        }
         List<Card> playableCards;
 
         if (isSevenPassMode || isTenDiscardMode || isSelectingTradeCards || isSelectingMiyakoOchiCards)
@@ -2038,9 +2046,14 @@ public class GameManager : MonoBehaviour
             playableCards = GetLegalCardsForUI(player.Hand, tableCards);
         }
 
-        for (int i = 0; i < player.Hand.Count; i++)
+        var displayCards = player.Hand
+            .OrderBy(card => GetCardStrength(card.IsJoker() ? 16 : card.Rank))
+            .ThenBy(card => card.Suit)
+            .ToList();
+
+        for (int i = 0; i < displayCards.Count; i++)
         {
-            var card = player.Hand[i];
+            var card = displayCards[i];
 
             var go = Instantiate(cardPrefab);
             go.transform.SetParent(playerCardSlots[i].transform, false);
