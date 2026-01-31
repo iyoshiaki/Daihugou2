@@ -81,6 +81,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI playerPreviousRankText;
     [SerializeField] private TextMeshProUGUI bindStatusText;
     [SerializeField] private TextMeshProUGUI ruleEffectText;
+    [SerializeField] private TextMeshProUGUI revolutionStatusText;
 
     private Queue<string> messageQueue = new();
     private bool isShowingMessage = false;
@@ -88,6 +89,8 @@ public class GameManager : MonoBehaviour
     private string lastRuleEffectText = "";
     private bool lastBindStatusVisible = false;
     private bool lastRuleEffectVisible = false;
+    private string lastRevolutionStatusText = "";
+    private bool lastRevolutionStatusVisible = false;
 
     [SerializeField] private GameObject cardSlotPrefab;
 
@@ -1226,6 +1229,7 @@ public class GameManager : MonoBehaviour
         AssignTextReference(ref playerPreviousRankText, "PlayerPreviousRankText");
         AssignTextReference(ref bindStatusText, "BindStatusText");
         AssignTextReference(ref ruleEffectText, "RuleEffectText");
+        AssignTextReference(ref revolutionStatusText, "RevolutionStatusText");
     }
 
     private void AssignTextReference(ref TextMeshProUGUI target, string objectName)
@@ -1345,6 +1349,7 @@ public class GameManager : MonoBehaviour
             UpdateButtonVisibility();
         }
         UpdateBindStatusText();
+        UpdateRevolutionStatusText();
         UpdateRuleEffectText();
     }
 
@@ -1387,6 +1392,25 @@ public class GameManager : MonoBehaviour
             ref lastRuleEffectVisible
         );
     }
+    private void UpdateRevolutionStatusText()
+    {
+        if (revolutionStatusText == null)
+        {
+            return;
+        }
+
+        var shouldShow = isRevolution;
+        var nextText = shouldShow ? "革命発動中" : "";
+
+        UpdateStatusText(
+            revolutionStatusText,
+            nextText,
+            shouldShow,
+            ref lastRevolutionStatusText,
+            ref lastRevolutionStatusVisible
+        );
+    }
+
 
     private void UpdateStatusText(
         TextMeshProUGUI target,
@@ -1454,10 +1478,6 @@ public class GameManager : MonoBehaviour
     {
         var labels = new List<string>();
 
-        if (IsRevolutionActive)
-        {
-            labels.Add("革命");
-        }
         if (isTempRevolution)
         {
             labels.Add("11バック");
