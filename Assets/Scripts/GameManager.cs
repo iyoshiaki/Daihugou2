@@ -194,7 +194,7 @@ public class GameManager : MonoBehaviour
     public int GetCardStrength(int rank)
     {
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
-        // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16=Joker
+        // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16
 
         int power = 0;
         if (rank == 16) power = 14; // Joker (最強)
