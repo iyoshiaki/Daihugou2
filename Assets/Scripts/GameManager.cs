@@ -149,6 +149,9 @@ public class GameManager : MonoBehaviour
     private bool pendingSuitLockSelection = false;
     private PlayerBase pendingSuitLockPlayer = null;
 
+    [Header("Debug")]
+    [SerializeField] private bool debugForceTenhoChihoHand = true;
+
 
     private bool IsJokerStopActive => jokerStopTurnsRemaining > 0;
     public bool IsJokerStopActiveForPlay => IsJokerStopActive;
@@ -1131,7 +1134,141 @@ public class GameManager : MonoBehaviour
 
         ApplySoloRuleSettings();
 
+        if (TryTriggerTenhoChiho())
+        {
+            return;
+        }
+
         StartTurn();
+    }
+    private bool TryTriggerTenhoChiho()
+    {
+        var winner = players.FirstOrDefault(player => HasTenhoChihoHand(player.Hand));
+        if (winner == null)
+        {
+            return false;
+        }
+
+        StartCoroutine(HandleTenhoChihoWin(winner));
+        return true;
+    }
+
+    private bool HasTenhoChihoHand(List<Card> hand)
+    {
+        if (hand == null || hand.Count == 0)
+        {
+            return false;
+        }
+
+        if (hand.Any(card => card.IsJoker()))
+        {
+            return false;
+        }
+
+        var targetSuit = hand
+            .GroupBy(card => card.Suit)
+            .OrderByDescending(group => group.Count())
+            .Select(group => group.Key)
+            .FirstOrDefault();
+
+        var requiredRanks = Enumerable.Range(3, 13).ToHashSet();
+        foreach (var card in hand.Where(card => card.Suit == targetSuit))
+        {
+            requiredRanks.Remove(card.Rank);
+        }
+
+        return requiredRanks.Count == 0;
+    }
+
+    private IEnumerator HandleTenhoChihoWin(PlayerBase winner)
+    {
+        yield return StartCoroutine(PlayTenhoChihoAnimation());
+
+        ApplyTenhoChihoRanks(winner);
+        isGameOver = true;
+        StartCoroutine(EndGameRoutine());
+    }
+
+    private void ApplyTenhoChihoRanks(PlayerBase winner)
+    {
+        if (gameRanks.ContainsKey(winner))
+        {
+            return;
+        }
+
+        gameRanks[winner] = currentRank;
+        EnqueueMessage($"{winner.Name} が天和地和で勝利! ({GetRankDisplayText(currentRank)})");
+        currentRank++;
+        remainingPlayers.Remove(winner);
+        freezePassCounts.Remove(winner);
+
+        foreach (var player in remainingPlayers.ToList())
+        {
+            gameRanks[player] = currentRank;
+            EnqueueMessage($"{player.Name} が{GetRankDisplayText(currentRank)}です。");
+            currentRank++;
+            freezePassCounts.Remove(player);
+        }
+
+        remainingPlayers.Clear();
+    }
+
+    private IEnumerator PlayTenhoChihoAnimation()
+    {
+        var targetText = passMessageText != null ? passMessageText : SibariMessageText;
+        if (targetText == null)
+        {
+            Debug.LogWarning("天和地和演出用のテキストが見つかりません。");
+            yield break;
+        }
+
+        var rect = targetText.rectTransform;
+        var originalScale = rect.localScale;
+        var originalRotation = rect.localRotation;
+        var originalText = targetText.text;
+        var originalActive = targetText.gameObject.activeSelf;
+        var originalAlignment = targetText.alignment;
+
+        targetText.gameObject.SetActive(true);
+        targetText.alignment = TextAlignmentOptions.Center;
+
+        var cg = targetText.GetComponent<CanvasGroup>();
+        if (cg == null)
+        {
+            cg = targetText.gameObject.AddComponent<CanvasGroup>();
+        }
+        var originalAlpha = cg.alpha;
+
+        targetText.text = "<size=140%>✨✨✨</size>";
+        rect.localScale = Vector3.zero;
+        cg.alpha = 0f;
+
+        float duration = 1.0f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = Mathf.Sin(t * Mathf.PI * 0.5f);
+            rect.localScale = Vector3.Lerp(Vector3.zero, originalScale * 1.6f, eased);
+            cg.alpha = Mathf.Lerp(0f, 1f, eased);
+            rect.localRotation = Quaternion.Euler(0f, 0f, Mathf.Lerp(0f, 360f, t));
+            yield return null;
+        }
+
+        targetText.text = "<size=220%><b>天和地和</b></size>";
+        rect.localRotation = Quaternion.identity;
+        rect.localScale = originalScale * 1.8f;
+        cg.alpha = 1f;
+
+        yield return new WaitForSeconds(2.5f);
+
+        rect.localScale = originalScale;
+        rect.localRotation = originalRotation;
+        cg.alpha = originalAlpha;
+        targetText.alignment = originalAlignment;
+        targetText.text = originalText;
+        targetText.gameObject.SetActive(originalActive);
     }
 
     private void ApplySoloRuleSettings()
@@ -1797,6 +1934,12 @@ public class GameManager : MonoBehaviour
         var deck = CreateDeck();
         Shuffle(deck);
 
+        if (debugForceTenhoChihoHand)
+        {
+            DealDebugTenhoChihoHand(deck);
+            return;
+        }
+
         int index = 0;
         while (deck.Count > 0)
         {
@@ -1804,6 +1947,32 @@ public class GameManager : MonoBehaviour
             else cpuPlayers[index % 4 - 1].Hand.Add(deck[0]);
             deck.RemoveAt(0);
             index++;
+        }
+
+        PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
+        PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
+        PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
+    }
+    private void DealDebugTenhoChihoHand(List<Card> deck)
+    {
+        var forcedCards = deck
+            .Where(card => !card.IsJoker() && card.Suit == Suit.Club && card.Rank >= 3 && card.Rank <= 15)
+            .OrderBy(card => card.Rank)
+            .ToList();
+
+        foreach (var card in forcedCards)
+        {
+            deck.Remove(card);
+        }
+
+        human.Hand.AddRange(forcedCards);
+
+        int cpuIndex = 0;
+        while (deck.Count > 0)
+        {
+            cpuPlayers[cpuIndex % cpuPlayers.Count].Hand.Add(deck[0]);
+            deck.RemoveAt(0);
+            cpuIndex++;
         }
 
         PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
