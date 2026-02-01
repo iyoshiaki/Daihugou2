@@ -4208,23 +4208,23 @@ public class GameManager : MonoBehaviour
 
     private PlayerBase ChooseTradeTargetForCpu(PlayerBase sourcePlayer)
     {
-        if (remainingPlayers.Contains(human) && sourcePlayer != human)
+        var candidates = GetTradeTargetCandidates(sourcePlayer);
+        if (candidates.Count == 0)
         {
-            return human;
+            return null;
         }
 
-        int startIndex = (players.IndexOf(sourcePlayer) + 1) % players.Count;
-        for (int i = 0; i < players.Count; i++)
-        {
-            int index = (startIndex + i) % players.Count;
-            var candidate = players[index];
-            if (candidate != sourcePlayer && remainingPlayers.Contains(candidate))
+        return candidates
+            .Select(candidate => new
             {
-                return candidate;
-            }
-        }
-
-        return null;
+                Player = candidate,
+                HandCount = candidate.Hand.Count,
+                TieBreaker = Random.value
+            })
+            .OrderBy(entry => entry.HandCount)
+            .ThenBy(entry => entry.TieBreaker)
+            .Select(entry => entry.Player)
+            .FirstOrDefault();
     }
 
     private List<Card> SelectTradeCardsForCpu(PlayerBase player, int count)
@@ -4347,9 +4347,22 @@ public class GameManager : MonoBehaviour
         if (targets.Count == 0) return;
 
         int applyCount = Mathf.Min(count, targets.Count);
-        for (int i = 0; i < applyCount; i++)
+        var orderedTargets = targets
+            .Select(target => new
+            {
+                Player = target,
+                HandCount = target.Hand.Count,
+                TieBreaker = Random.value
+            })
+            .OrderBy(entry => entry.HandCount)
+            .ThenBy(entry => entry.TieBreaker)
+            .Take(applyCount)
+            .Select(entry => entry.Player)
+            .ToList();
+
+        for (int i = 0; i < orderedTargets.Count; i++)
         {
-            var target = targets[i];
+            var target = orderedTargets[i];
             if (!TryConsumeBarrierForFreezeTarget(target))
             {
                 AddFreezePass(target, 1);
