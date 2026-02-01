@@ -145,6 +145,7 @@ public class GameManager : MonoBehaviour
     private bool isSuitLockTurnActive = false;
     private int suitLockTurnsRemaining = 0;
     private HashSet<Suit> suitLockSuits = new();
+    private bool suitLockQueuedForNextTurn = false;
     private bool isSelectingSuitLock = false;
     private int suitLockSelectionIndex = 0;
     private List<Suit> suitLockSelectableSuits = new();
@@ -319,6 +320,11 @@ public class GameManager : MonoBehaviour
     {
         // ゲーム終了時は何もしない
         if (isGameOver) return;
+
+        if (isSuitLockTurnActive)
+        {
+            ConsumeSuitLockTurn();
+        }
 
         ConsumeJokerStopTurn();
 
@@ -521,6 +527,12 @@ public class GameManager : MonoBehaviour
         if (IsJokerStopActive)
         {
             hand = hand.Where(c => !c.IsJoker()).ToList();
+        }
+        if (isSuitLockTurnActive && suitLockSuits.Count > 0)
+        {
+            hand = hand
+                .Where(card => card.IsJoker() || suitLockSuits.Contains(card.Suit))
+                .ToList();
         }
         if (hand.Count == 0)
         {
@@ -1994,36 +2006,41 @@ public class GameManager : MonoBehaviour
 
     public void OnPlayButton()
     {
-        if (isPlayerActionInProgress) return;
-        if (!TryLockPlayerAction()) return;
         if (isSelectingSuitLock)
         {
+            if (!TryLockPlayerAction()) return;
             ConfirmSuitLockSelection();
             return;
         }
 
         if (isSelectingTradeTarget)
         {
+            if (!TryLockPlayerAction()) return;
             ConfirmTradeTargetSelection();
             return;
         }
 
         if (isSelectingMiyakoOchiCards)
         {
+            if (!TryLockPlayerAction()) return;
             HandleMiyakoOchiSelection();
             return;
         }
 
         if (isSelectingTradeCards)
         {
+            if (!TryLockPlayerAction()) return;
             HandleTradeCardSelection();
             return;
         }
         if (isFreezeTwelveMode)
         {
+            if (!TryLockPlayerAction()) return;
             ConfirmFreezeTargetSelection();
             return;
         }
+        if (isPlayerActionInProgress) return;
+        if (!TryLockPlayerAction()) return;
         if (!isPlayerTurn) return;
 
         if (passButton != null) passButton.gameObject.SetActive(false);
@@ -3095,6 +3112,12 @@ public class GameManager : MonoBehaviour
         {
             hand = hand.Where(c => !c.IsJoker()).ToList();
         }
+        if (isSuitLockTurnActive && suitLockSuits.Count > 0)
+        {
+            hand = hand
+                .Where(card => card.IsJoker() || suitLockSuits.Contains(card.Suit))
+                .ToList();
+        }
         if (isFourStopWindowActive)
         {
             return GetFourStopCards(hand, GetRequiredFourStopCount());
@@ -3508,6 +3531,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        isPlayerActionInProgress = false;
         isSelectingSuitLock = true;
         suitLockSelectableSuits = GetSuitLockSelectableSuits(player);
         suitLockSelectionIndex = 0;
@@ -3599,6 +3623,10 @@ public class GameManager : MonoBehaviour
         suitLockTurnsRemaining = 1;
         suitLockSuits.Clear();
         suitLockSuits.Add(suit);
+        if (isSuitLockTurnActive)
+        {
+            suitLockQueuedForNextTurn = true;
+        }
         EnqueueMessage($"スートロック発動! 次のターンは{GetSuitLabel(suit)}のみ");
     }
 
@@ -3727,6 +3755,13 @@ public class GameManager : MonoBehaviour
     private void ConsumeSuitLockTurn()
     {
         if (!isSuitLockTurnActive) return;
+        if (suitLockQueuedForNextTurn)
+        {
+            suitLockQueuedForNextTurn = false;
+            suitLockTurnsRemaining = 1;
+            isSuitLockTurnActive = false;
+            return;
+        }
         suitLockTurnsRemaining = Mathf.Max(0, suitLockTurnsRemaining - 1);
         if (suitLockTurnsRemaining == 0)
         {
@@ -3737,13 +3772,18 @@ public class GameManager : MonoBehaviour
 
     private void ClearSuitLockOnFieldClear()
     {
-        if (isSelectingSuitLock)
+        if (pendingSuitLockSelection || isSelectingSuitLock)
         {
-            EndSuitLockSelection();
+            return;
+        }
+        if (suitLockTurnsRemaining > 0)
+        {
+            return;
         }
         suitLockTurnsRemaining = 0;
         suitLockSuits.Clear();
         isSuitLockTurnActive = false;
+        suitLockQueuedForNextTurn = false;
         pendingSuitLockSelection = false;
         pendingSuitLockPlayer = null;
         suitLockSelectionIndex = 0;
@@ -4924,6 +4964,7 @@ public class GameManager : MonoBehaviour
         isSuitLockTurnActive = false;
         suitLockTurnsRemaining = 0;
         suitLockSuits.Clear();
+        suitLockQueuedForNextTurn = false;
         isSelectingSuitLock = false;
         suitLockSelectionIndex = 0;
         suitLockSelectableSuits.Clear();
