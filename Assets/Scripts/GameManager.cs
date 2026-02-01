@@ -3444,7 +3444,7 @@ public class GameManager : MonoBehaviour
         {
             var suitSet = GetBindSuitSet(selected, isStair);
             if (suitSet.Count == 0) return false;
-            if (!suitSet.All(s => boundSuits.Contains(s))) return false;
+            if (!suitSet.IsSupersetOf(boundSuits)) return false;
         }
 
         return true;
