@@ -1579,7 +1579,7 @@ public class GameManager : MonoBehaviour
         }
         if (pendingTwoCount > 0)
         {
-            labels.Add("2流し");
+            labels.Add(GetTwoFlowLabel());
         }
         if (isFourStopWindowActive)
         {
@@ -2677,7 +2677,8 @@ public class GameManager : MonoBehaviour
             if (IsSixStopWindowEligible(effectivePlayedCards))
             {
                 isSixStopWindowActive = true;
-                pendingTwoCount = effectivePlayedCards.Count(c => c.Rank == 15);
+                int triggerRank = GetSixStopTriggerRank();
+                pendingTwoCount = effectivePlayedCards.Count(c => c.Rank == triggerRank);
             }
             else
             {
@@ -3018,7 +3019,8 @@ public class GameManager : MonoBehaviour
     {
         if (!enableSixStop) return false;
         if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
-        if (!effectivePlayed.All(c => c.Rank == 15)) return false;
+        int triggerRank = GetSixStopTriggerRank();
+        if (!effectivePlayed.All(c => c.Rank == triggerRank)) return false;
         return effectivePlayed.Count <= 2;
     }
 
@@ -3031,6 +3033,15 @@ public class GameManager : MonoBehaviour
             2 => 4,
             _ => 0
         };
+    }
+    private int GetSixStopTriggerRank()
+    {
+        return IsRevolutionActive ? 3 : 15;
+    }
+
+    private string GetTwoFlowLabel()
+    {
+        return IsRevolutionActive ? "3流し" : "2流し";
     }
 
     private int GetRequiredFourStopCount()
