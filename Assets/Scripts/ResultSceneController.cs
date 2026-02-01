@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+ï»¿using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -110,6 +111,14 @@ public class ResultSceneController : MonoBehaviour
 
         var results = GameResultData.LastResults;
 
+        var sortedResults = results?
+            .Select((entry, index) => new { entry, index })
+            .OrderByDescending(item => item.entry.FirstPlaceCount)
+            .ThenBy(item => item.index)
+            .ToList();
+        int currentRank = 0;
+        int? previousCount = null;
+
         for (int i = 0; i < resultTexts.Length; i++)
         {
             var text = resultTexts[i];
@@ -118,10 +127,16 @@ public class ResultSceneController : MonoBehaviour
                 continue;
             }
 
-            if (results != null && i < results.Count)
+            if (sortedResults != null && i < sortedResults.Count)
             {
-                var entry = results[i];
-                text.text = $"{entry.Name}\n1ˆÊ‰ñ”:{entry.FirstPlaceCount}‰ñ";
+                var entry = sortedResults[i].entry;
+                if (previousCount != entry.FirstPlaceCount)
+                {
+                    currentRank = i + 1;
+                    previousCount = entry.FirstPlaceCount;
+                }
+
+                text.text = $"{currentRank}ä½ {entry.Name}\n1ä½å›žæ•°:{entry.FirstPlaceCount}";
             }
             else
             {
