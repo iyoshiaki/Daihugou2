@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine.UI;
 using System.Collections;
 using TMPro;
+using UnityEngine.SceneManagement;
 
 public class GameManager : MonoBehaviour
 {
@@ -25,6 +26,7 @@ public class GameManager : MonoBehaviour
     private Dictionary<PlayerBase, int> gameRanks = new(); // 順位 (Key:Player, Value:順位)
     private Dictionary<PlayerBase, int> previousRoundRanks = new(); // 前回順位 (Key:Player, Value:順位)
     private Dictionary<PlayerBase, string> previousRoundTitles = new(); // 前回ランク名 (Key:Player, Value:ランク名)
+    private Dictionary<PlayerBase, int> firstPlaceCounts = new(); // 1位回数
     private int currentRank = 1; // 現在の順位（1位からスタート）
     private bool isGameOver = false; // ゲーム（1ラウンド）終了フラグ
 
@@ -51,7 +53,7 @@ public class GameManager : MonoBehaviour
 
 
     // 4回戦の設定
-    private const int TotalGames = 4;
+    private const int TotalGames = 1;
     private int currentGameCount = 1;
     private Dictionary<PlayerBase, int> totalPoints = new(); // 累計スコア
 
@@ -1148,6 +1150,7 @@ public class GameManager : MonoBehaviour
         players.AddRange(cpuPlayers);
 
         remainingPlayers = new List<PlayerBase>(players);
+        InitializeFirstPlaceCounts();
         currentGameCount = 1;
         currentTurnIndex = GetStartIndexFromPlayer(FindClubThreeHolder());
         AssignRankTextReferences();
@@ -5423,6 +5426,7 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(3.0f);
 
+        RegisterFirstPlaceResult();
         currentGameCount++;
 
         if (currentGameCount <= TotalGames)
@@ -5433,7 +5437,52 @@ public class GameManager : MonoBehaviour
         else
         {
             EnqueueMessage("全4戦終了!お疲れ様でした!");
+            StoreResultsForScene();
+            yield return new WaitForSeconds(2.0f);
+            SceneManager.LoadScene("Result");
         }
+    }
+    private void InitializeFirstPlaceCounts()
+    {
+        firstPlaceCounts.Clear();
+        foreach (var player in players)
+        {
+            firstPlaceCounts[player] = 0;
+        }
+    }
+
+    private void RegisterFirstPlaceResult()
+    {
+        foreach (var entry in gameRanks)
+        {
+            if (entry.Value != 1)
+            {
+                continue;
+            }
+
+            if (!firstPlaceCounts.ContainsKey(entry.Key))
+            {
+                firstPlaceCounts[entry.Key] = 0;
+            }
+
+            firstPlaceCounts[entry.Key]++;
+        }
+    }
+
+    private void StoreResultsForScene()
+    {
+        var results = new List<GameResultData.PlayerResult>();
+        foreach (var player in players)
+        {
+            firstPlaceCounts.TryGetValue(player, out var count);
+            results.Add(new GameResultData.PlayerResult
+            {
+                Name = player.Name,
+                FirstPlaceCount = count
+            });
+        }
+
+        GameResultData.SetResults(results);
     }
 
     private void ForceMiyakoOchiDaihinmin(PlayerBase winner)
