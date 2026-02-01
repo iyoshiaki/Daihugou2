@@ -147,7 +147,6 @@ public class GameManager : MonoBehaviour
     private HashSet<Suit> suitLockSuits = new();
     private bool isSelectingSuitLock = false;
     private int suitLockSelectionIndex = 0;
-    private readonly Suit[] suitLockSelectionOptions = { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
     private List<Suit> suitLockSelectableSuits = new();
     private bool pendingSuitLockSelection = false;
     private PlayerBase pendingSuitLockPlayer = null;
@@ -226,6 +225,9 @@ public class GameManager : MonoBehaviour
     private bool isSelectingMiyakoOchiCards = false;
 
     private int pendingActionCardCount = 0; // 渡す/捨てる枚数
+    private int pendingSevenPassCount = 0;
+    private int pendingTenDiscardCount = 0;
+    private PlayerBase pendingActionPlayer = null;
 
     private int pendingTradeCardCount = 0;  // 6トレードの枚数
     private PlayerBase tradeSourcePlayer;
@@ -243,6 +245,10 @@ public class GameManager : MonoBehaviour
     private bool miyakoSelectionDone = false;
     private List<Card> pendingMiyakoOchiCards = new();
     private PlayerBase clubThreeHolderBeforeTrade = null;
+    private bool pendingEightCutTriggered = false;
+    private bool pendingEightCutKeepTurn = false;
+    private bool pendingEightCutWindowEligible = false;
+    private int pendingEightCutRankCount = 0;
 
 
 
@@ -256,13 +262,17 @@ public class GameManager : MonoBehaviour
         isPlayerActionLocked = false;
         isPlayerActionInProgress = false;
         suppressPassAfterPlay = false;
+        if (lastPlayedCards == null || lastPlayedCards.Count == 0)
+        {
+            ClearSuitLockOnFieldClear();
+        }
         if (IsFreezePassActive(currentPlayer))
         {
             StartCoroutine(HandleFreezePassTurn(currentPlayer));
             return;
         }
 
-        isSuitLockTurnActive = suitLockTurnsRemaining > 0;
+        isSuitLockTurnActive = suitLockTurnsRemaining > 0 && suitLockSuits.Count > 0;
         if (isSuitLockTurnActive && suitLockSuits.Count > 0)
         {
             var suitMessage = string.Join("・", suitLockSuits.Select(GetSuitLabel));
@@ -2623,7 +2633,7 @@ public class GameManager : MonoBehaviour
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
-        bool eightCutTriggered = state.IsEightCut;
+        SetPendingEightCutState(effectivePlayedCards, state);
 
         if (fourStopTriggered)
         {
@@ -2644,37 +2654,6 @@ public class GameManager : MonoBehaviour
             yield break;
         }
 
-        if (eightCutTriggered)
-        {
-            EnqueueMessage("8切り!");
-
-            if (IsFourStopWindowEligible(effectivePlayedCards))
-            {
-                isFourStopWindowActive = true;
-                pendingEightCutCount = effectivePlayedCards.Count(c => c.Rank == 8);
-                pendingSkipCount = 0;
-                lastSkippedCount = 0;
-            }
-            else
-            {
-                yield return new WaitForSeconds(1.0f);
-                foreach (Transform child in tableArea) Destroy(child.gameObject);
-                lastPlayedCards.Clear();
-                passCount = 0;
-
-                pendingSkipCount = 0;
-                // 8切りでも一時的な革命状態をリセット
-                isTempRevolution = false;
-                isNineForceActive = false;
-                ResetBindState();
-                ConsumeElevenSilenceField();
-
-                if (state.KeepTurn && remainingPlayers.Contains(currentPlayer))
-                {
-                    skipTurnAdvance = true;
-                }
-            }
-        }
 
         if (!state.IsElevenSilence)
         {
@@ -2689,7 +2668,9 @@ public class GameManager : MonoBehaviour
                 pendingTwoCount = 0;
             }
         }
-
+        pendingSevenPassCount = state.SevenPassCount;
+        pendingTenDiscardCount = state.TenDiscardCount;
+        pendingActionPlayer = (pendingSevenPassCount > 0 || pendingTenDiscardCount > 0) ? currentPlayer : null;
 
         if (state.SixTradeCount > 0 && remainingPlayers.Contains(currentPlayer))
         {
@@ -2701,53 +2682,19 @@ public class GameManager : MonoBehaviour
             yield break;
         }
 
-        // ★修正: 7渡し処理
-        if (state.SevenPassCount > 0 && remainingPlayers.Contains(currentPlayer))
+        yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+        if (isSevenPassMode || isTenDiscardMode)
         {
-            // まず発動メッセージを表示
-            EnqueueMessage("7渡し発動!");
-
-            // メッセージを読ませるために少し待機 (モード切替前)
-            yield return new WaitForSeconds(1.5f);
-
-            Debug.Log($"7渡しシーケンス開始: {state.SevenPassCount}枚");
-            isSevenPassMode = true; // ここでモードON
-            pendingActionCardCount = state.SevenPassCount;
-
-            // シーケンス開始
-            StartCoroutine(HandleSevenPassSequence(currentPlayer));
             yield break;
-        }
-
-        // ★修正: 10捨て処理
-        if (state.TenDiscardCount > 0 && remainingPlayers.Contains(currentPlayer))
-        {
-            // まず発動メッセージを表示
-            EnqueueMessage("10捨て発動!");
-
-            // メッセージを読ませるために少し待機
-            yield return new WaitForSeconds(1.5f);
-
-            Debug.Log($"10捨てシーケンス開始: {state.TenDiscardCount}枚");
-            isTenDiscardMode = true; // ここでモードON
-            pendingActionCardCount = state.TenDiscardCount;
-
-            // シーケンス開始
-            StartCoroutine(HandleTenDiscardSequence(currentPlayer));
-            yield break;
-        }
-
-        if (eightCutTriggered)
-        {
-            // skipTurnAdvance true なら EndTurn でループ
         }
 
         if (pendingSkipCount > 0)
         {
         }
-        if (pendingSuitLockSelection && !isSixTradeMode && !isSevenPassMode && !isTenDiscardMode)
+        if (!isSixTradeMode && !isSevenPassMode && !isTenDiscardMode)
         {
-            if (TryResolvePendingSuitLockSelection())
+            yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+            if (isSelectingSuitLock)
             {
                 yield break;
             }
@@ -2904,6 +2851,11 @@ public class GameManager : MonoBehaviour
         isSixStopWindowActive = false;
         pendingTwoCount = 0;
         ResetBindState();
+        ClearSuitLockOnFieldClear();
+        pendingEightCutTriggered = false;
+        pendingEightCutKeepTurn = false;
+        pendingEightCutWindowEligible = false;
+        pendingEightCutRankCount = 0;
         ConsumeElevenSilenceField();
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
@@ -3590,7 +3542,7 @@ public class GameManager : MonoBehaviour
         var suit = suitLockSelectableSuits[suitLockSelectionIndex];
         ActivateSuitLock(suit);
         EndSuitLockSelection();
-        EndTurn();
+        StartCoroutine(CompleteSuitLockSelection());
     }
 
     private void UpdateSuitLockMessage()
@@ -3617,6 +3569,14 @@ public class GameManager : MonoBehaviour
         }
         ResetPlayButtonUI();
     }
+    private IEnumerator CompleteSuitLockSelection()
+    {
+        if (pendingEightCutTriggered)
+        {
+            yield return StartCoroutine(HandlePendingEightCut());
+        }
+        EndTurn();
+    }
 
     private List<Suit> GetSuitLockSelectableSuits(PlayerBase player)
     {
@@ -3629,11 +3589,6 @@ public class GameManager : MonoBehaviour
         if (nonJokerSuits.Count > 0)
         {
             return nonJokerSuits;
-        }
-
-        if (player.Hand.Any(card => card.IsJoker()))
-        {
-            return suitLockSelectionOptions.ToList();
         }
 
         return new List<Suit>();
@@ -3660,15 +3615,98 @@ public class GameManager : MonoBehaviour
 
         if (targetPlayer is HumanPlayer)
         {
+            var selectableSuits = GetSuitLockSelectableSuits(targetPlayer);
+            if (selectableSuits.Count == 0)
+            {
+                EnqueueMessage("スートロック: 選択可能なスートがありません");
+                return false;
+            }
             BeginSuitLockSelection(targetPlayer);
             return true;
         }
 
-        ActivateSuitLock(ChooseSuitLockForCpu(targetPlayer, null));
+        if (TryActivateSuitLockForCpu(targetPlayer, null))
+        {
+            return false;
+        }
         return false;
     }
 
-    private Suit ChooseSuitLockForCpu(PlayerBase player, List<Card> effectivePlayed)
+    private IEnumerator ResolvePendingSuitLockAndEightCut()
+    {
+        if (pendingSuitLockSelection)
+        {
+            if (TryResolvePendingSuitLockSelection())
+            {
+                yield break;
+            }
+        }
+
+        if (pendingEightCutTriggered)
+        {
+            yield return StartCoroutine(HandlePendingEightCut());
+        }
+    }
+
+    private void SetPendingEightCutState(List<Card> effectivePlayedCards, GameState state)
+    {
+        pendingEightCutTriggered = state.IsEightCut;
+        if (!pendingEightCutTriggered)
+        {
+            pendingEightCutKeepTurn = false;
+            pendingEightCutWindowEligible = false;
+            pendingEightCutRankCount = 0;
+            return;
+        }
+        pendingEightCutKeepTurn = state.KeepTurn;
+        pendingEightCutWindowEligible = IsFourStopWindowEligible(effectivePlayedCards);
+        pendingEightCutRankCount = effectivePlayedCards.Count(c => c.Rank == 8);
+    }
+
+    private IEnumerator HandlePendingEightCut()
+    {
+        if (!pendingEightCutTriggered)
+        {
+            yield break;
+        }
+
+        EnqueueMessage("8切り!");
+
+        if (pendingEightCutWindowEligible)
+        {
+            isFourStopWindowActive = true;
+            pendingEightCutCount = pendingEightCutRankCount;
+            pendingSkipCount = 0;
+            lastSkippedCount = 0;
+        }
+        else
+        {
+            yield return new WaitForSeconds(1.0f);
+            foreach (Transform child in tableArea) Destroy(child.gameObject);
+            lastPlayedCards.Clear();
+            passCount = 0;
+
+            pendingSkipCount = 0;
+            // 8切りでも一時的な革命状態をリセット
+            isTempRevolution = false;
+            isNineForceActive = false;
+            ResetBindState();
+            ClearSuitLockOnFieldClear();
+            ConsumeElevenSilenceField();
+
+            if (pendingEightCutKeepTurn && remainingPlayers.Contains(players[currentTurnIndex]))
+            {
+                skipTurnAdvance = true;
+            }
+        }
+
+        pendingEightCutTriggered = false;
+        pendingEightCutKeepTurn = false;
+        pendingEightCutWindowEligible = false;
+        pendingEightCutRankCount = 0;
+    }
+
+    private bool TryActivateSuitLockForCpu(PlayerBase player, List<Card> effectivePlayed)
     {
         var suitCounts = player.Hand
             .Where(c => !c.IsJoker())
@@ -3679,14 +3717,11 @@ public class GameManager : MonoBehaviour
 
         if (suitCounts != null)
         {
-            return suitCounts.Suit;
+            ActivateSuitLock(suitCounts.Suit);
+            return true;
         }
 
-        if (effectivePlayed != null && effectivePlayed.Count > 0)
-        {
-            return effectivePlayed[0].Suit;
-        }
-        return Suit.Spade;
+        return false;
     }
 
     private void ConsumeSuitLockTurn()
@@ -3698,6 +3733,21 @@ public class GameManager : MonoBehaviour
             suitLockSuits.Clear();
         }
         isSuitLockTurnActive = false;
+    }
+
+    private void ClearSuitLockOnFieldClear()
+    {
+        if (isSelectingSuitLock)
+        {
+            EndSuitLockSelection();
+        }
+        suitLockTurnsRemaining = 0;
+        suitLockSuits.Clear();
+        isSuitLockTurnActive = false;
+        pendingSuitLockSelection = false;
+        pendingSuitLockPlayer = null;
+        suitLockSelectionIndex = 0;
+        suitLockSelectableSuits.Clear();
     }
 
     private void ResetBindState()
@@ -3979,10 +4029,10 @@ public class GameManager : MonoBehaviour
         if (TryConsumeBarrier(targetPlayer, "6トレード"))
         {
             EndSixTradeMode();
-            if (TryResolvePendingSuitLockSelection())
-            {
-                yield break;
-            }
+            yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+            if (isSevenPassMode || isTenDiscardMode) yield break;
+            yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+            if (isSelectingSuitLock) yield break;
             EndTurn();
             yield break;
         }
@@ -3991,10 +4041,10 @@ public class GameManager : MonoBehaviour
         if (tradeCount <= 0)
         {
             EndSixTradeMode();
-            if (TryResolvePendingSuitLockSelection())
-            {
-                yield break;
-            }
+            yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+            if (isSevenPassMode || isTenDiscardMode) yield break;
+            yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+            if (isSelectingSuitLock) yield break;
             EndTurn();
             yield break;
         }
@@ -4044,10 +4094,10 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(0.8f);
 
         EndSixTradeMode();
-        if (TryResolvePendingSuitLockSelection())
-        {
-            yield break;
-        }
+        yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+        if (isSevenPassMode || isTenDiscardMode) yield break;
+        yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+        if (isSelectingSuitLock) yield break;
         EndTurn();
     }
 
@@ -4080,13 +4130,16 @@ public class GameManager : MonoBehaviour
         }
 
         EndSixTradeMode();
-        if (TryResolvePendingSuitLockSelection())
-        {
-            return true;
-        }
-
-        EndTurn();
+        StartCoroutine(CompleteSixTradeBarrierResolution());
         return true;
+    }
+    private IEnumerator CompleteSixTradeBarrierResolution()
+    {
+        yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+        if (isSevenPassMode || isTenDiscardMode) yield break;
+        yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+        if (isSelectingSuitLock) yield break;
+        EndTurn();
     }
 
     private void UpdateTradeTargetMessage()
@@ -4267,7 +4320,48 @@ public class GameManager : MonoBehaviour
     {
         return TryConsumeBarrier(target, "フリーズ12");
     }
+    private IEnumerator TryStartPendingSevenPassOrTenDiscard()
+    {
+        if (pendingActionPlayer == null || !remainingPlayers.Contains(pendingActionPlayer))
+        {
+            pendingSevenPassCount = 0;
+            pendingTenDiscardCount = 0;
+            pendingActionPlayer = null;
+            yield break;
+        }
 
+        if (pendingSevenPassCount > 0)
+        {
+            var actionPlayer = pendingActionPlayer;
+            EnqueueMessage("7渡し発動!");
+            yield return new WaitForSeconds(1.5f);
+
+            Debug.Log($"7渡しシーケンス開始: {pendingSevenPassCount}枚");
+            isSevenPassMode = true;
+            pendingActionCardCount = pendingSevenPassCount;
+            pendingSevenPassCount = 0;
+            if (pendingTenDiscardCount == 0)
+            {
+                pendingActionPlayer = null;
+            }
+            StartCoroutine(HandleSevenPassSequence(actionPlayer ?? players[currentTurnIndex]));
+            yield break;
+        }
+
+        if (pendingTenDiscardCount > 0)
+        {
+            var actionPlayer = pendingActionPlayer;
+            EnqueueMessage("10捨て発動!");
+            yield return new WaitForSeconds(1.5f);
+
+            Debug.Log($"10捨てシーケンス開始: {pendingTenDiscardCount}枚");
+            isTenDiscardMode = true;
+            pendingActionCardCount = pendingTenDiscardCount;
+            pendingTenDiscardCount = 0;
+            pendingActionPlayer = null;
+            StartCoroutine(HandleTenDiscardSequence(actionPlayer ?? players[currentTurnIndex]));
+        }
+    }
     private IEnumerator HandleSevenPassSequence(PlayerBase player)
     {
         if (TryConsumeBarrierForSevenPassTarget(player))
@@ -4393,7 +4487,10 @@ public class GameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.8f);
 
-        ResetSevenPassTenDiscardState();
+        ResetSevenPassTenDiscardState(true);
+        yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+        if (isSevenPassMode || isTenDiscardMode) yield break;
+
 
         var winContext = new WinContext
         {
@@ -4406,10 +4503,9 @@ public class GameManager : MonoBehaviour
         CheckForWin(fromPlayer, winContext);
         if (isGameOver) yield break;
 
-        if (TryResolvePendingSuitLockSelection())
-        {
-            yield break;
-        }
+        yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+        if (isSelectingSuitLock) yield break;
+
 
         EndTurn();
     }
@@ -4447,11 +4543,13 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        ResetSevenPassTenDiscardState();
-        if (TryResolvePendingSuitLockSelection())
-        {
-            return true;
-        }
+        ResetSevenPassTenDiscardState(true);
+        StartCoroutine(CompleteSevenPassBarrierResolution(fromPlayer));
+        return true;
+    }
+
+    private IEnumerator CompleteSevenPassBarrierResolution(PlayerBase fromPlayer)
+    {
         var winContext = new WinContext
         {
             HasPlayContext = true,
@@ -4461,8 +4559,14 @@ public class GameManager : MonoBehaviour
             IsTenDiscard = false
         };
         CheckForWin(fromPlayer, winContext);
+        if (isGameOver) yield break;
+
+        yield return StartCoroutine(TryStartPendingSevenPassOrTenDiscard());
+        if (isSevenPassMode || isTenDiscardMode) yield break;
+
+        yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+        if (isSelectingSuitLock) yield break;
         EndTurn();
-        return true;
     }
 
     public IEnumerator ExecuteTenDiscardAction(PlayerBase player, List<Card> cards)
@@ -4499,10 +4603,8 @@ public class GameManager : MonoBehaviour
         CheckForWin(player, winContext);
         if (isGameOver) yield break;
 
-        if (TryResolvePendingSuitLockSelection())
-        {
-            yield break;
-        }
+        yield return StartCoroutine(ResolvePendingSuitLockAndEightCut());
+        if (isSelectingSuitLock) yield break;
 
         EndTurn();
     }
@@ -4776,11 +4878,17 @@ public class GameManager : MonoBehaviour
         SetPassButtonLabel("パス");
         if (kirikaeButton != null) kirikaeButton.gameObject.SetActive(false);
     }
-    private void ResetSevenPassTenDiscardState()
+    private void ResetSevenPassTenDiscardState(bool keepPendingActions = false)
     {
         isSevenPassMode = false;
         isTenDiscardMode = false;
         pendingActionCardCount = 0;
+        pendingSevenPassCount = 0;
+        if (!keepPendingActions)
+        {
+            pendingTenDiscardCount = 0;
+            pendingActionPlayer = null;
+        }
 
         if (passMessageText != null)
         {
@@ -4805,6 +4913,10 @@ public class GameManager : MonoBehaviour
         isSingleOnlyTurn = false;
         elevenSilenceFieldsRemaining = 0;
         isNineForceActive = false;
+        pendingEightCutTriggered = false;
+        pendingEightCutKeepTurn = false;
+        pendingEightCutWindowEligible = false;
+        pendingEightCutRankCount = 0;
 
         isFourStopWindowActive = false;
         isSixStopWindowActive = false;
