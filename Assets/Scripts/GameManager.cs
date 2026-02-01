@@ -45,6 +45,8 @@ public class GameManager : MonoBehaviour
     private bool enableFourStop = true;
     private bool enableSixStop = true;
     private bool enableEightCut = true;
+    private bool enableTenhouChiho = true;
+
 
 
 
@@ -82,6 +84,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI bindStatusText;
     [SerializeField] private TextMeshProUGUI ruleEffectText;
     [SerializeField] private TextMeshProUGUI revolutionStatusText;
+    [SerializeField] private TextMeshProUGUI specialWinText;
     [SerializeField] private Camera backgroundCamera;
     [SerializeField] private Color revolutionBackgroundColor = new Color(0.6f, 0.1f, 0.1f, 0f);
 
@@ -1131,6 +1134,11 @@ public class GameManager : MonoBehaviour
 
         ApplySoloRuleSettings();
 
+        if (TryTriggerTenhouChihoStart())
+        {
+            return;
+        }
+
         StartTurn();
     }
 
@@ -1154,6 +1162,7 @@ public class GameManager : MonoBehaviour
         enableFourStop = SoloRuleSettings.GetRuleEnabled("FourStop");
         enableSixStop = SoloRuleSettings.GetRuleEnabled("SixStop");
         enableEightCut = SoloRuleSettings.GetRuleEnabled("EightCut");
+        enableTenhouChiho = SoloRuleSettings.GetRuleEnabled("TenhouChiho");
 
         forbidSpecialWin = SoloRuleSettings.GetRuleEnabled("ForbidSpecialWin");
         enableMiyakoOchi = SoloRuleSettings.GetRuleEnabled("MiyakoOchi");
@@ -1194,6 +1203,7 @@ public class GameManager : MonoBehaviour
         enableFourStop = true;
         enableSixStop = true;
         enableEightCut = true;
+        enableTenhouChiho = true;
         forbidSpecialWin = false;
         enableMiyakoOchi = true;
         enableMiyakoOchiDemotion = true;
@@ -1236,6 +1246,7 @@ public class GameManager : MonoBehaviour
         AssignTextReference(ref bindStatusText, "BindStatusText");
         AssignTextReference(ref ruleEffectText, "RuleEffectText");
         AssignTextReference(ref revolutionStatusText, "RevolutionStatusText");
+        AssignTextReference(ref specialWinText, "SpecialWinText");
     }
 
     private void AssignTextReference(ref TextMeshProUGUI target, string objectName)
@@ -4824,6 +4835,198 @@ public class GameManager : MonoBehaviour
             text.text = label;
         }
     }
+    private bool TryTriggerTenhouChihoStart()
+    {
+        if (!enableTenhouChiho)
+        {
+            return false;
+        }
+
+        var winner = GetTenhouChihoWinner(out _);
+        if (winner == null)
+        {
+            return false;
+        }
+
+        StartCoroutine(HandleTenhouChihoWin(winner));
+        return true;
+    }
+
+    private PlayerBase GetTenhouChihoWinner(out Suit suit)
+    {
+        suit = Suit.Spade;
+        if (players == null)
+        {
+            return null;
+        }
+
+        foreach (var player in players)
+        {
+            if (HasTenhouChihoHand(player, out suit))
+            {
+                return player;
+            }
+        }
+
+        return null;
+    }
+
+    private bool HasTenhouChihoHand(PlayerBase player, out Suit suit)
+    {
+        suit = Suit.Spade;
+        if (player == null || player.Hand == null)
+        {
+            return false;
+        }
+
+        Suit[] suits = { Suit.Spade, Suit.Heart, Suit.Diamond, Suit.Club };
+        foreach (var targetSuit in suits)
+        {
+            var suitRanks = new HashSet<int>(
+                player.Hand
+                    .Where(card => !card.IsJoker() && card.Suit == targetSuit)
+                    .Select(card => card.Rank));
+
+            bool hasAllRanks = true;
+            for (int rank = 3; rank <= 15; rank++)
+            {
+                if (!suitRanks.Contains(rank))
+                {
+                    hasAllRanks = false;
+                    break;
+                }
+            }
+
+            if (hasAllRanks)
+            {
+                suit = targetSuit;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private IEnumerator HandleTenhouChihoWin(PlayerBase winner)
+    {
+        isGameOver = true;
+        ApplyTenhouChihoRanks(winner);
+        yield return StartCoroutine(PlayTenhouChihoAnimation());
+        EnqueueMessage($"{winner.Name} が天和地和で即勝ち!");
+        StartCoroutine(EndGameRoutine());
+    }
+
+    private void ApplyTenhouChihoRanks(PlayerBase winner)
+    {
+        gameRanks.Clear();
+        currentRank = 1;
+        gameRanks[winner] = currentRank;
+
+        int nextRank = 2;
+        foreach (var player in players)
+        {
+            if (player == winner)
+            {
+                continue;
+            }
+
+            gameRanks[player] = nextRank;
+            nextRank++;
+        }
+
+        if (remainingPlayers == null)
+        {
+            remainingPlayers = new List<PlayerBase>();
+        }
+        remainingPlayers.Clear();
+    }
+
+    private TextMeshProUGUI GetOrCreateSpecialWinText()
+    {
+        if (specialWinText != null)
+        {
+            return specialWinText;
+        }
+
+        var baseText = passMessageText ?? ruleEffectText ?? revolutionStatusText;
+        if (baseText == null)
+        {
+            return null;
+        }
+
+        var go = new GameObject("SpecialWinText", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(CanvasGroup));
+        go.transform.SetParent(baseText.transform.parent, false);
+
+        var rect = go.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = new Vector2(1200f, 400f);
+
+        var text = go.GetComponent<TextMeshProUGUI>();
+        text.alignment = TextAlignmentOptions.Center;
+        text.fontSize = 96;
+        text.color = new Color(1f, 0.85f, 0.2f, 1f);
+        text.enableWordWrapping = false;
+        text.gameObject.SetActive(false);
+
+        specialWinText = text;
+        return text;
+    }
+
+    private IEnumerator PlayTenhouChihoAnimation()
+    {
+        var text = GetOrCreateSpecialWinText();
+        if (text == null)
+        {
+            yield break;
+        }
+
+        var group = text.GetComponent<CanvasGroup>();
+        var rect = text.rectTransform;
+
+        text.text = "天和地和";
+        text.gameObject.SetActive(true);
+        group.alpha = 0f;
+        rect.localScale = Vector3.one * 0.4f;
+
+        Color startColor = new Color(1f, 0.7f, 0.2f, 1f);
+        Color flashColor = new Color(1f, 1f, 1f, 1f);
+
+        float introDuration = 1.2f;
+        float elapsed = 0f;
+        while (elapsed < introDuration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / introDuration);
+            float scale = Mathf.Lerp(0.4f, 1.4f, progress);
+            rect.localScale = Vector3.one * scale;
+            group.alpha = Mathf.Sin(progress * Mathf.PI);
+            text.color = Color.Lerp(startColor, flashColor, Mathf.PingPong(progress * 2f, 1f));
+            yield return null;
+        }
+
+        rect.localScale = Vector3.one * 1.4f;
+        group.alpha = 1f;
+        text.color = new Color(1f, 0.85f, 0.2f, 1f);
+
+        yield return new WaitForSeconds(1.4f);
+
+        float outroDuration = 0.8f;
+        elapsed = 0f;
+        while (elapsed < outroDuration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / outroDuration);
+            group.alpha = Mathf.Lerp(1f, 0f, progress);
+            rect.localScale = Vector3.one * Mathf.Lerp(1.4f, 1.0f, progress);
+            yield return null;
+        }
+
+        group.alpha = 0f;
+        text.gameObject.SetActive(false);
+    }
 
     private struct WinContext
     {
@@ -5166,6 +5369,11 @@ public class GameManager : MonoBehaviour
         foreach (var p in players) p.Hand.Clear();
         DealInitialCards();
         clubThreeHolderBeforeTrade = FindClubThreeHolder();
+
+        if (TryTriggerTenhouChihoStart())
+        {
+            yield break;
+        }
 
         yield return StartCoroutine(RunPreparationPhase());
 
