@@ -4558,6 +4558,8 @@ public class GameManager : MonoBehaviour
         }
         Debug.Log($"{fromPlayer.Name} から {toPlayer.Name} へ {cards.Count}枚 渡します");
 
+        bool sevenPassTriggered = isSevenPassMode;
+
         foreach (var card in cards)
         {
             fromPlayer.Hand.Remove(card);
@@ -4602,7 +4604,7 @@ public class GameManager : MonoBehaviour
             HasPlayContext = false,
             PlayedCards = null,
             IsEightCut = false,
-            IsSevenPass = cards.Count > 0,
+            IsSevenPass = sevenPassTriggered,
             IsTenDiscard = false
         };
         CheckForWin(fromPlayer, winContext);
@@ -4678,6 +4680,8 @@ public class GameManager : MonoBehaviour
     {
         Debug.Log($"{player.Name} は {cards.Count}枚 捨てました");
 
+        bool tenDiscardTriggered = isTenDiscardMode;
+
         foreach (var card in cards)
         {
             player.Hand.Remove(card);
@@ -4703,7 +4707,7 @@ public class GameManager : MonoBehaviour
             PlayedCards = null,
             IsEightCut = false,
             IsSevenPass = false,
-            IsTenDiscard = cards.Count > 0
+            IsTenDiscard = tenDiscardTriggered
         };
         CheckForWin(player, winContext);
         if (isGameOver) yield break;
@@ -5311,7 +5315,7 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        int lowestRank = GetLowestAvailableForbiddenRank();
+        int lowestRank = GetLowestAvailableForbiddenRank(player);
         gameRanks[player] = lowestRank;
         EnqueueMessage($"禁止上がり: {player.Name} は{reason}であがったため{lowestRank}位になります!");
 
@@ -5337,24 +5341,29 @@ public class GameManager : MonoBehaviour
         return true;
     }
 
-    private int GetLowestAvailableForbiddenRank()
+    private int GetLowestAvailableForbiddenRank(PlayerBase player)
     {
         int startRank = currentRank;
         int endRank = currentRank + remainingPlayers.Count - 1;
         var usedRanks = new HashSet<int>(gameRanks.Values);
         for (int rank = endRank; rank >= startRank; rank--)
         {
-            if (IsRankReservedForMiyakoOchi(rank)) continue;
+            if (IsRankReservedForMiyakoOchi(rank, player)) continue;
             if (usedRanks.Contains(rank)) continue;
             return rank;
         }
         return endRank;
     }
 
-    private bool IsRankReservedForMiyakoOchi(int rank)
+    private bool IsRankReservedForMiyakoOchi(int rank, PlayerBase player)
     {
         if (rank != 4) return false;
-        return IsMiyakoOchiDemotionPending();
+        if (!IsMiyakoOchiDemotionPending()) return false;
+
+        var previousDaifugo = GetPlayerByPreviousRank(1);
+        if (previousDaifugo == null) return false;
+
+        return previousDaifugo != player;
     }
 
     private bool IsMiyakoOchiDemotionPending()
