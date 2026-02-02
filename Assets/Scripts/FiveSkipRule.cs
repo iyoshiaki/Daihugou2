@@ -15,6 +15,6 @@ public class FiveSkipRule : IRule
         // 出した枚数分だけ飛ばす（1枚なら1人飛ばし＝次の次の人へ）
         int count = playedCards.Count(c => c.Rank == 5);
         state.SkipCount = count;
-        Debug.Log($"5飛ばし! {count} 人飛ばします。");
+        Debug.Log($"5飛ばし! {count} 人飛ばします!");
     }
 }

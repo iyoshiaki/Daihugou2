@@ -12,6 +12,6 @@ public class ElevenSilenceRule : IRule
     public void Apply(List<Card> playedCards, GameState state)
     {
         state.IsElevenSilence = true;
-        Debug.Log("11サイレンス! この場と次の場の特殊効果を無効にします。");
+        Debug.Log("11サイレンス! この場と次の場の特殊効果を無効にします!");
     }
 }

@@ -16,7 +16,7 @@ public class HumanPlayer : PlayerBase
     {
         if (SelectedCards == null || SelectedCards.Count == 0)
         {
-            Debug.Log("⚠️ カードが選択されていません。");
+            Debug.Log("⚠️ カードが選択されていません!");
             return false;
         }
 
@@ -32,7 +32,7 @@ public class HumanPlayer : PlayerBase
         if (SelectedCards != null)
         {
             SelectedCards.Clear();
-            Debug.Log("HumanPlayer: 選択中カードリストをクリアしました。");
+            Debug.Log("HumanPlayer: 選択中カードリストをクリアしました!");
         }
     }
 

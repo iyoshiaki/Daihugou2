@@ -13,6 +13,6 @@ public class ElevenBackRule : IRule
     public void Apply(List<Card> playedCards, GameState state)
     {
         state.IsElevenBack = true;
-        Debug.Log("11バック!この場のみ革命状態になります。");
+        Debug.Log("11バック!この場のみ革命状態になります!");
     }
 }

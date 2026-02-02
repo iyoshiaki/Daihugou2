@@ -12,6 +12,6 @@ public class FourSingleRule : IRule
     public void Apply(List<Card> playedCards, GameState state)
     {
         state.ForceSingleNextTurn = true;
-        Debug.Log("4シングル発動: 次のターンは1枚出しのみ。");
+        Debug.Log("4シングル発動: 次のターンは1枚出しのみ!");
     }
 }

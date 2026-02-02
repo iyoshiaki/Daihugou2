@@ -192,7 +192,7 @@ public class GameManager : MonoBehaviour
     public void SetForbidSpecialWin(bool value)
     {
         forbidSpecialWin = value;
-        Debug.Log($"禁止あがりルールが {(value ? "ON" : "OFF")} に設定されました。");
+        Debug.Log($"禁止あがりルールが {(value ? "ON" : "OFF")} に設定されました!");
     }
 
     // ★カードの強さを数値化するメソッド (修正: Jokerを最強に設定)
@@ -301,7 +301,7 @@ public class GameManager : MonoBehaviour
             CreatePlayerCardSlots(human.Hand.Count);
             PopulatePlayerHand(human);
             isPlayerTurn = true;
-            Debug.Log("あなたのターンです。カードを選んでPlayボタンを押してください。");
+            Debug.Log("あなたのターンです!カードを選んでPlayボタンを押してください!");
         }
         else
         {
@@ -466,14 +466,14 @@ public class GameManager : MonoBehaviour
             if (playableCards.Count == 0)
             {
                 EnqueueMessage($"{cpu.Name} はパスしました");
-                Debug.Log($"{cpu.Name} はパスしました。");
+                Debug.Log($"{cpu.Name} はパスしました!");
                 yield return new WaitForSeconds(0.8f);
                 HandlePass();
                 yield break;
             }
             if (!IsValidPlay(cpu.Hand, playableCards, lastPlayedCards))
             {
-                Debug.LogWarning($"{cpu.Name} の出し手が無効と判断されたためパスします。");
+                Debug.LogWarning($"{cpu.Name} の出し手が無効と判断されたためパスします!");
                 EnqueueMessage($"{cpu.Name} はパスしました");
                 yield return new WaitForSeconds(0.8f);
                 HandlePass();
@@ -2091,7 +2091,7 @@ public class GameManager : MonoBehaviour
 
             if (played == null || played.Count == 0)
             {
-                Debug.Log("カードが選択されていません。");
+                Debug.Log("カードが選択されていません!");
                 if (playButton != null) playButton.interactable = true;
                 isPlayerActionInProgress = false;
                 return;
@@ -2099,7 +2099,7 @@ public class GameManager : MonoBehaviour
 
             if (!IsValidPlay(human.Hand, played, lastPlayedCards))
             {
-                Debug.Log("そのカードは出せません。");
+                Debug.Log("そのカードは出せません!");
                 if (playButton != null) playButton.interactable = true;
                 isPlayerActionInProgress = false;
                 return;
@@ -2499,7 +2499,7 @@ public class GameManager : MonoBehaviour
             CheckForWin(currentPlayer, winContext);
             if (isGameOver) yield break;
 
-            EnqueueMessage("スペード3返し!場が流れます。");
+            EnqueueMessage("スペード3返し!場が流れます!");
             // ★修正: 強制流しの前に一時的な革命状態をリセット
             isTempRevolution = false;
 
@@ -2584,7 +2584,7 @@ public class GameManager : MonoBehaviour
         if (state.ForceSingleNextTurn)
         {
             forceSingleNextTurn = true;
-            EnqueueMessage("4シングル! 次のターンは1枚出しのみ。");
+            EnqueueMessage("4シングル! 次のターンは1枚出しのみ!");
         }
 
         if (state.TriggerNineForce)
@@ -2620,7 +2620,7 @@ public class GameManager : MonoBehaviour
 
         if (state.TriggerGreatChaos)
         {
-            EnqueueMessage("大混乱! 手札がランダムに入れ替わります。");
+            EnqueueMessage("大混乱! 手札がランダムに入れ替わります!");
             yield return new WaitForSeconds(1.0f);
             ApplyGreatChaos();
         }
@@ -2739,7 +2739,7 @@ public class GameManager : MonoBehaviour
             var currentPlayer = players[currentTurnIndex];
             if (HasValidPlayForNineForce(currentPlayer.Hand, lastPlayedCards))
             {
-                EnqueueMessage("9フォース中は出せるカードがある限りパスできません。");
+                EnqueueMessage("9フォース中は出せるカードがある限りパスできません!");
                 isPlayerActionInProgress = false;
                 if (passButton != null) passButton.interactable = true;
                 return;
@@ -2914,7 +2914,7 @@ public class GameManager : MonoBehaviour
     {
         if (passMessageText == null)
         {
-            Debug.LogWarning("passMessageText が未設定です。Canvas上のテキストをアサインしてください。");
+            Debug.LogWarning("passMessageText が未設定です!Canvas上のテキストをアサインしてください!");
             yield break;
         }
 
@@ -2969,7 +2969,7 @@ public class GameManager : MonoBehaviour
 
             if (passMessageText == null)
             {
-                Debug.LogWarning("passMessageText が未設定です。");
+                Debug.LogWarning("passMessageText が未設定です!");
                 yield break;
             }
 
@@ -3187,9 +3187,9 @@ public class GameManager : MonoBehaviour
 
             foreach (var g in groups)
             {
-                // ★重要: スペード3が普通の3として出せるのは、場がジョーカーでない場合のみ。
-                // 既にジョーカー単体の場合は上のifブロックでスペード3のみがチェックされている。
-                // ここでは普通の3としての処理を継続。
+                // ★重要: スペード3が普通の3として出せるのは、場がジョーカーでない場合のみ!
+                // 既にジョーカー単体の場合は上のifブロックでスペード3のみがチェックされている!
+                // ここでは普通の3としての処理を継続!
                 if (g.Count() >= fieldCount)
                 {
                     if (GetCardStrength(g.Key) > fieldStrength)
@@ -3905,8 +3905,8 @@ public class GameManager : MonoBehaviour
 
 
     /// <summary>
-    /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします。
-    /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります。
+    /// 7渡し、10捨ての選択中に表示される永続メッセージを非表示にします!
+    /// このメソッドは、プレイヤーがカードの選択を完了し、「あげる」または「捨てる」ボタンを押した際に呼び出す必要があります!
     /// </summary>
     private void ClearPassMessage()
     {
@@ -4371,7 +4371,7 @@ public class GameManager : MonoBehaviour
                 AddFreezePass(target, 1);
             }
         }
-        EnqueueMessage($"フリーズ THE 12: {applyCount}人をパス状態にしました。");
+        EnqueueMessage($"フリーズ THE 12: {applyCount}人をパス状態にしました!");
     }
 
     private void AddFreezePass(PlayerBase target, int count)
@@ -4381,7 +4381,7 @@ public class GameManager : MonoBehaviour
             freezePassCounts[target] = 0;
         }
         freezePassCounts[target] += count;
-        EnqueueMessage($"{target.Name} はフリーズでパスになります。");
+        EnqueueMessage($"{target.Name} はフリーズでパスになります!");
     }
     private bool TryConsumeBarrierForFreezeTarget(PlayerBase target)
     {
@@ -4437,7 +4437,7 @@ public class GameManager : MonoBehaviour
         }
         // ★修正: メッセージを具体的に
         int maxAllowed = Mathf.Min(pendingActionCardCount, player.Hand.Count);
-        string message = $"渡すカードを\n<size=120%>0〜{maxAllowed}枚</size>\n選んでください";
+        string message = $"渡すカードを\n<size=120%>{maxAllowed}枚</size>以下\n選んでください";
         if (player is HumanPlayer)
         {
             // ★常時表示用にテキストエリアを直接書き換え & 表示
@@ -4475,7 +4475,7 @@ public class GameManager : MonoBehaviour
     {
         // ★修正: メッセージを具体的に
         int maxAllowed = Mathf.Min(pendingActionCardCount, player.Hand.Count);
-        string message = $"捨てるカードを\n<size=120%>0〜{maxAllowed}枚</size>\n選んでください";
+        string message = $"捨てるカードを\n<size=120%>{maxAllowed}枚</size>以下\n選んでください";
         if (player is HumanPlayer)
         {
             // ★常時表示
@@ -4513,7 +4513,7 @@ public class GameManager : MonoBehaviour
         PlayerBase toPlayer = GetNextRemainingPlayer(fromPlayer);
         if (toPlayer == null)
         {
-            Debug.LogWarning("7渡しの有効な受け取り手が見つかりません。");
+            Debug.LogWarning("7渡しの有効な受け取り手が見つかりません!");
             ResetSevenPassTenDiscardState();
             EndTurn();
             yield break;
@@ -4688,7 +4688,7 @@ public class GameManager : MonoBehaviour
     {
         if (previousRoundRanks.Count == 0)
         {
-            Debug.Log("12ペナルティ: 前回順位がないためスキップします。");
+            Debug.Log("12ペナルティ: 前回順位がないためスキップします!");
             return;
         }
 
@@ -4703,7 +4703,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        EnqueueMessage("12ペナルティ発動! 前回1位・2位は最強カードを捨てます。");
+        EnqueueMessage("12ペナルティ発動! 前回1位・2位は最強カードを捨てます!");
 
         foreach (var target in targets)
         {
@@ -4725,7 +4725,7 @@ public class GameManager : MonoBehaviour
                 if (cpuArea != null) PopulateCpuHandAsBack(cpuArea, target.Hand.Count);
             }
 
-            EnqueueMessage($"{target.Name} は最強カードを捨てました。");
+            EnqueueMessage($"{target.Name} は最強カードを捨てました!");
 
             CheckForWin(target);
             if (isGameOver) break;
@@ -4745,7 +4745,7 @@ public class GameManager : MonoBehaviour
 
         if (previousRoundRanks.Count == 0)
         {
-            Debug.Log("都落ち: 前回順位がないためスキップします。");
+            Debug.Log("都落ち: 前回順位がないためスキップします!");
             yield break;
         }
 
@@ -4756,7 +4756,7 @@ public class GameManager : MonoBehaviour
 
         if (daifugo == null || fugo == null || hinmin == null || daihinmin == null)
         {
-            Debug.LogWarning("都落ち: 対象プレイヤーが不足しているためスキップします。");
+            Debug.LogWarning("都落ち: 対象プレイヤーが不足しているためスキップします!");
             yield break;
         }
 
@@ -4798,7 +4798,7 @@ public class GameManager : MonoBehaviour
             ExecuteCardTransfer(hinmin, fugo, hinminGive);
         }
 
-        EnqueueMessage("都落ち発動! 前回順位に応じてカードを交換しました。");
+        EnqueueMessage("都落ち発動! 前回順位に応じてカードを交換しました!");
 
         if (human != null)
         {
@@ -4888,13 +4888,13 @@ public class GameManager : MonoBehaviour
             yield break;
         }
 
-        EnqueueMessage("準備フェーズ: 都落ちのカード交換を行います。");
+        EnqueueMessage("準備フェーズ: 都落ちのカード交換を行います!");
         yield return new WaitForSeconds(1.0f);
 
         yield return StartCoroutine(ApplyMiyakoOchiTrade());
 
         yield return new WaitForSeconds(1.0f);
-        EnqueueMessage("準備フェーズ終了。");
+        EnqueueMessage("準備フェーズ終了!");
     }
 
     private PlayerBase GetPlayerByPreviousRank(int rank)
@@ -5275,7 +5275,7 @@ public class GameManager : MonoBehaviour
 
         int lowestRank = GetLowestAvailableForbiddenRank();
         gameRanks[player] = lowestRank;
-        EnqueueMessage($"🚫 禁止上がり: {player.Name} は{reason}であがったため{lowestRank}位になります。");
+        EnqueueMessage($"禁止上がり: {player.Name} は{reason}であがったため{lowestRank}位になります!");
 
         remainingPlayers.Remove(player);
         freezePassCounts.Remove(player);
@@ -5291,7 +5291,7 @@ public class GameManager : MonoBehaviour
         {
             var lastPlayer = remainingPlayers[0];
             gameRanks[lastPlayer] = currentRank;
-            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
+            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です!");
             isGameOver = true;
             StartCoroutine(EndGameRoutine());
         }
@@ -5376,7 +5376,7 @@ public class GameManager : MonoBehaviour
             {
                 var lastPlayer = remainingPlayers[0];
                 gameRanks[lastPlayer] = currentRank;
-                EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
+                EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です!");
 
                 isGameOver = true;
                 StartCoroutine(EndGameRoutine());
@@ -5533,13 +5533,13 @@ public class GameManager : MonoBehaviour
         remainingPlayers.Remove(previousDaifugo);
         freezePassCounts.Remove(previousDaifugo);
         UpdateDemotedPlayerHand(previousDaifugo);
-        EnqueueMessage("都落ち発動! 前回大富豪が大貧民確定となりました。");
+        EnqueueMessage("都落ち発動! 前回大富豪が大貧民確定となりました!");
 
         if (remainingPlayers.Count == 1)
         {
             var lastPlayer = remainingPlayers[0];
             gameRanks[lastPlayer] = currentRank;
-            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です。");
+            EnqueueMessage($"{lastPlayer.Name} が{GetRankDisplayText(currentRank)}です!");
 
             isGameOver = true;
             StartCoroutine(EndGameRoutine());

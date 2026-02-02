@@ -86,7 +86,7 @@ public class CpuPlayer : PlayerBase
         // =============================
         if (playableSets.Count == 0)
         {
-            Debug.Log($"{Name} はパスしました。");
+            Debug.Log($"{Name} はパスしました!");
 
             if (gameManager != null)
             {
