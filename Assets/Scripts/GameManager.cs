@@ -629,7 +629,7 @@ public class GameManager : MonoBehaviour
 
     private List<Card> SelectOpeningPlay(CpuPlayer cpu, List<Card> hand)
     {
-        var stairs = FindStairSequences(hand);
+        var stairs = FindStairSequencesWithJoker(hand);
         if (stairs.Count > 0)
         {
             var chosen = cpuDifficulty >= CpuDifficulty.Strong
@@ -688,7 +688,7 @@ public class GameManager : MonoBehaviour
     {
         return stairs
             .OrderByDescending(seq => seq.Count)
-            .ThenByDescending(seq => GetCardStrength(seq.Max(c => c.Rank)))
+            .ThenByDescending(seq => GetCardStrength(GetStairSequenceMaxRank(seq)))
             .First();
     }
 
@@ -793,7 +793,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        var stairs = FindStairSequences(uniqueHand.Where(c => !c.IsJoker()).ToList());
+        var stairs = FindStairSequencesWithJoker(uniqueHand);
         foreach (var seq in stairs)
         {
             if (IsValidPlay(hand, seq, field))
@@ -1014,10 +1014,10 @@ public class GameManager : MonoBehaviour
     private List<Card> SelectStairResponse(List<Card> hand, List<Card> field, List<Card> fieldRealCards, int fieldCount, int fieldStrength)
     {
         Suit? fieldSuit = fieldRealCards.Count > 0 ? fieldRealCards[0].Suit : (Suit?)null;
-        var stairs = FindStairSequences(hand)
+        var stairs = FindStairSequencesWithJoker(hand, fieldCount, fieldSuit)
             .Where(seq => seq.Count == fieldCount)
-            .Where(seq => fieldSuit == null || seq[0].Suit == fieldSuit.Value)
-            .Where(seq => GetCardStrength(seq.Max(c => c.Rank)) > fieldStrength)
+            .Where(seq => fieldSuit == null || seq.Any(card => !card.IsJoker() && card.Suit == fieldSuit.Value))
+            .Where(seq => GetCardStrength(GetStairSequenceMaxRank(seq)) > fieldStrength)
             .Where(IsBindSatisfied)
             .ToList();
 
@@ -1027,8 +1027,8 @@ public class GameManager : MonoBehaviour
         }
 
         var ordered = cpuDifficulty >= CpuDifficulty.Strong
-            ? stairs.OrderByDescending(seq => GetCardStrength(seq.Max(c => c.Rank)))
-            : stairs.OrderBy(seq => GetCardStrength(seq.Max(c => c.Rank)));
+            ? stairs.OrderByDescending(seq => GetCardStrength(GetStairSequenceMaxRank(seq)))
+            : stairs.OrderBy(seq => GetCardStrength(GetStairSequenceMaxRank(seq)));
 
         return ordered.First();
     }
@@ -1067,6 +1067,70 @@ public class GameManager : MonoBehaviour
             if (current.Count >= 3) stairs.Add(new List<Card>(current));
         }
         return stairs;
+    }
+    private List<List<Card>> FindStairSequencesWithJoker(List<Card> hand, int? requiredCount = null, Suit? requiredSuit = null)
+    {
+        if (!enableStair) return new List<List<Card>>();
+        var joker = hand.FirstOrDefault(c => c.IsJoker());
+        int jokerCount = joker != null ? 1 : 0;
+        var realCards = hand.Where(c => !c.IsJoker());
+        var suits = requiredSuit.HasValue
+            ? realCards.Where(c => c.Suit == requiredSuit.Value).GroupBy(c => c.Suit)
+            : realCards.GroupBy(c => c.Suit);
+
+        var lengths = requiredCount.HasValue ? new List<int> { requiredCount.Value } : new List<int> { 3, 4 };
+        var results = new List<List<Card>>();
+        var seen = new HashSet<string>();
+
+        foreach (var suitGroup in suits)
+        {
+            var byRank = suitGroup
+                .OrderBy(c => NormalizeStairRank(c.Rank))
+                .ToDictionary(c => NormalizeStairRank(c.Rank), c => c);
+
+            foreach (var length in lengths)
+            {
+                for (int start = 3; start <= 15 - length + 1; start++)
+                {
+                    var targetRanks = Enumerable.Range(start, length).ToList();
+                    int missing = targetRanks.Count(rank => !byRank.ContainsKey(rank));
+                    if (missing > jokerCount) continue;
+                    if (missing > 0 && joker == null) continue;
+
+                    var sequence = new List<Card>(length);
+                    bool jokerUsed = false;
+                    foreach (var rank in targetRanks)
+                    {
+                        if (byRank.TryGetValue(rank, out var card))
+                        {
+                            sequence.Add(card);
+                        }
+                        else if (!jokerUsed && joker != null)
+                        {
+                            sequence.Add(joker);
+                            jokerUsed = true;
+                        }
+                    }
+
+                    var (realSequence, sequenceJokers) = GetRealCardsAndJokers(sequence);
+                    if (!IsStairWithJoker(realSequence, sequenceJokers)) continue;
+
+                    string key = $"{suitGroup.Key}:{string.Join(",", targetRanks)}:{missing}";
+                    if (seen.Add(key))
+                    {
+                        results.Add(sequence);
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private int GetStairSequenceMaxRank(List<Card> sequence)
+    {
+        var (realCards, jokerCount) = GetRealCardsAndJokers(sequence);
+        return GetStairMaxRank(realCards, jokerCount);
     }
 
     private bool IsStair(List<Card> cards)
@@ -3185,6 +3249,7 @@ public class GameManager : MonoBehaviour
 
         var (fieldRealCards, fieldJokers) = GetRealCardsAndJokers(field);
         bool isFieldStair = IsStairWithJoker(fieldRealCards, fieldJokers);
+        Suit? fieldSuit = fieldRealCards.Count > 0 ? fieldRealCards[0].Suit : (Suit?)null;
 
         // ★UI用: ジョーカー込みの強さ計算を共通化（階段/同ランク）
         int fieldStrongestRank;
@@ -3220,12 +3285,13 @@ public class GameManager : MonoBehaviour
             var joker = hand.FirstOrDefault(c => c.IsJoker());
             var groups = hand.Where(c => !c.IsJoker()).GroupBy(c => c.Rank);
 
+            int availableJokers = joker != null ? 1 : 0;
             foreach (var g in groups)
             {
                 // ★重要: スペード3が普通の3として出せるのは、場がジョーカーでない場合のみ!
                 // 既にジョーカー単体の場合は上のifブロックでスペード3のみがチェックされている!
                 // ここでは普通の3としての処理を継続!
-                if (g.Count() >= fieldCount)
+                if (g.Count() + availableJokers >= fieldCount)
                 {
                     if (GetCardStrength(g.Key) > fieldStrength)
                     {
@@ -3255,13 +3321,13 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            var stairs = FindStairSequences(hand);
+            var stairs = FindStairSequencesWithJoker(hand, fieldCount, fieldSuit);
             foreach (var seq in stairs)
             {
                 if (seq.Count != fieldCount) continue;
-                if (seq[0].Suit != field[0].Suit) continue;
+                if (fieldSuit != null && !seq.Any(card => !card.IsJoker() && card.Suit == fieldSuit.Value)) continue;
 
-                int seqStrongestRank = seq.Max(c => c.Rank);
+                int seqStrongestRank = GetStairSequenceMaxRank(seq);
                 if (GetCardStrength(seqStrongestRank) > fieldStrength)
                 {
                     if (IsBindSatisfied(seq))
