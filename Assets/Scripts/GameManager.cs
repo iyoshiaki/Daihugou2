@@ -1041,7 +1041,7 @@ public class GameManager : MonoBehaviour
 
         foreach (var s in suits)
         {
-            var suitCards = s.OrderBy(c => c.Rank).ToList();
+            var suitCards = s.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
             List<Card> current = new();
 
             for (int i = 0; i < suitCards.Count; i++)
@@ -1052,7 +1052,7 @@ public class GameManager : MonoBehaviour
                 }
                 else
                 {
-                    if (suitCards[i].Rank == current.Last().Rank + 1)
+                    if (NormalizeStairRank(suitCards[i].Rank) == NormalizeStairRank(current.Last().Rank) + 1)
                     {
                         current.Add(suitCards[i]);
                     }
@@ -1077,14 +1077,23 @@ public class GameManager : MonoBehaviour
         var suit = cards[0].Suit;
         if (cards.Any(c => c.Suit != suit)) return false;
 
-        var sorted = cards.OrderBy(c => c.Rank).ToList();
+        var sorted = cards.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
 
         if (sorted.All(c => c.Rank == sorted[0].Rank)) return false;
 
         for (int i = 1; i < sorted.Count; i++)
-            if (sorted[i].Rank != sorted[i - 1].Rank + 1) return false;
+            if (NormalizeStairRank(sorted[i].Rank) != NormalizeStairRank(sorted[i - 1].Rank) + 1) return false;
 
         return true;
+    }
+    private int NormalizeStairRank(int rank)
+    {
+        return rank switch
+        {
+            1 => 14,
+            2 => 15,
+            _ => rank
+        };
     }
 
     private (List<Card> realCards, int jokerCount) GetRealCardsAndJokers(List<Card> cards)
@@ -1533,19 +1542,13 @@ public class GameManager : MonoBehaviour
             suitMessage = string.Join("・", boundSuits.Select(GetSuitLabel));
         }
 
-        string numberMessage = "";
-        if (isNumberBindActive && expectedNextRank > 0)
-        {
-            numberMessage = GetRankLabel(expectedNextRank);
-        }
-
         if (isNumberBindActive && isSuitBindActive)
         {
-            return $"{numberMessage} & {suitMessage}";
+            return string.IsNullOrEmpty(suitMessage) ? "数縛り" : $"数縛り & {suitMessage}";
         }
         if (isNumberBindActive)
         {
-            return $"{numberMessage} のみ";
+            return "数縛り";
         }
 
         if (string.IsNullOrEmpty(suitMessage))
@@ -1553,7 +1556,7 @@ public class GameManager : MonoBehaviour
             return "";
         }
 
-        return $"{suitMessage} のみ";
+        return suitMessage;
     }
 
     private List<string> GetActiveRuleLabels()
@@ -2289,8 +2292,11 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        var sortedRanks = realCards.OrderBy(c => c.Rank).Select(c => c.Rank).Distinct().ToList();
-
+        var sortedRanks = realCards
+                    .Select(c => NormalizeStairRank(c.Rank))
+                    .OrderBy(r => r)
+                    .Distinct()
+                    .ToList();
         int requiredJokers = 0;
 
         for (int i = 0; i < sortedRanks.Count - 1; i++)
@@ -2309,6 +2315,14 @@ public class GameManager : MonoBehaviour
         int realStairLength = sortedRanks.Count;
         int finalStairLength = realStairLength + requiredJokers + remainingJokers;
 
+        int maxRealRank = sortedRanks.Last();
+        int maxRank = maxRealRank + remainingJokers;
+
+        if (maxRank > 15)
+        {
+            return false;
+        }
+
         // ★修正: 既に totalCards でチェックしているが、ロジックの確認のため再度チェック
         return finalStairLength >= 3 && finalStairLength <= 4;
     }
@@ -2320,8 +2334,8 @@ public class GameManager : MonoBehaviour
             return 15;
         }
 
-        int maxRealRank = realCards.Max(c => c.Rank);
-        return maxRealRank + jokerCount;
+        int maxRealRank = realCards.Max(c => NormalizeStairRank(c.Rank));
+        return Mathf.Min(15, maxRealRank + jokerCount);
     }
 
     private void OnPassButton()
@@ -2510,7 +2524,7 @@ public class GameManager : MonoBehaviour
         }
 
 
-        List<Card> effectivePlayedCards = GetEffectivePlayedCards(played);
+        List<Card> rulePlayedCards = new List<Card>(played);
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
         bool isElevenSilenceActive = IsElevenSilenceActive;
@@ -2523,9 +2537,9 @@ public class GameManager : MonoBehaviour
         {
             foreach (var rule in rules)
             {
-                if (rule.CanApply(effectivePlayedCards, state))
+                if (rule.CanApply(rulePlayedCards, state))
                 {
-                    rule.Apply(effectivePlayedCards, state);
+                    rule.Apply(rulePlayedCards, state);
                     if (state.IsElevenSilence) break;
                 }
             }
@@ -2598,7 +2612,8 @@ public class GameManager : MonoBehaviour
             ActivateBarrier(currentPlayer);
         }
 
-        if (state.TriggerRevolution)
+        bool fiveSkipRevolution = state.SkipCount >= 4;
+        if (state.TriggerRevolution && !fiveSkipRevolution)
         {
             isRevolution = !isRevolution;
             EnqueueMessage(isRevolution ? "革命開始!" : "革命終了!");
@@ -2610,9 +2625,9 @@ public class GameManager : MonoBehaviour
             isTempRevolution = true;
         }
 
-        UpdateBindState(fieldBeforePlay, effectivePlayedCards);
+        UpdateBindState(fieldBeforePlay, rulePlayedCards);
 
-        if (IsSuitLockTrigger(effectivePlayedCards))
+        if (IsSuitLockTrigger(rulePlayedCards))
         {
             pendingSuitLockSelection = true;
             pendingSuitLockPlayer = currentPlayer;
@@ -2648,12 +2663,29 @@ public class GameManager : MonoBehaviour
 
         pendingSkipCount = state.SkipCount;
         lastSkippedCount = state.SkipCount;
-        if (pendingSkipCount > 0)
+        if (pendingSkipCount > 0 && pendingSkipCount < 3)
         {
             EnqueueMessage($"{pendingSkipCount}人飛ばし!");
         }
 
-        SetPendingEightCutState(effectivePlayedCards, state);
+        SetPendingEightCutState(rulePlayedCards, state);
+
+        if (state.SkipCount >= 3)
+        {
+            if (fiveSkipRevolution)
+            {
+                isRevolution = !isRevolution;
+                EnqueueMessage(isRevolution ? "革命開始!" : "革命終了!");
+                EnqueueMessage("5を4枚! 革命&場流し!");
+            }
+            else
+            {
+                EnqueueMessage("5を3枚以上! 場が流れます!");
+            }
+            yield return new WaitForSeconds(1.0f);
+            yield return StartCoroutine(ClearTableAndRestart());
+            yield break;
+        }
 
         if (fourStopTriggered)
         {
@@ -2677,11 +2709,11 @@ public class GameManager : MonoBehaviour
 
         if (!state.IsElevenSilence)
         {
-            if (IsSixStopWindowEligible(effectivePlayedCards))
+            if (IsSixStopWindowEligible(rulePlayedCards))
             {
                 isSixStopWindowActive = true;
                 int triggerRank = GetSixStopTriggerRank();
-                pendingTwoCount = effectivePlayedCards.Count(c => c.Rank == triggerRank);
+                pendingTwoCount = rulePlayedCards.Count(c => c.Rank == triggerRank);
             }
             else
             {
@@ -3010,21 +3042,23 @@ public class GameManager : MonoBehaviour
         if (played == null || played.Count == 0) return false;
         return played.Any(c => c.Rank == 8);
     }
-    private bool IsFourStopWindowEligible(List<Card> effectivePlayed)
+    private bool IsFourStopWindowEligible(List<Card> played)
     {
         if (!enableFourStop) return false;
-        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
-        if (!effectivePlayed.All(c => c.Rank == 8)) return false;
-        return effectivePlayed.Count <= 2;
+        if (played == null || played.Count == 0) return false;
+        if (played.Any(c => c.IsJoker())) return false;
+        if (!played.All(c => c.Rank == 8)) return false;
+        return played.Count <= 2;
     }
 
-    private bool IsSixStopWindowEligible(List<Card> effectivePlayed)
+    private bool IsSixStopWindowEligible(List<Card> played)
     {
         if (!enableSixStop) return false;
-        if (effectivePlayed == null || effectivePlayed.Count == 0) return false;
+        if (played == null || played.Count == 0) return false;
+        if (played.Any(c => c.IsJoker())) return false;
         int triggerRank = GetSixStopTriggerRank();
-        if (!effectivePlayed.All(c => c.Rank == triggerRank)) return false;
-        return effectivePlayed.Count <= 2;
+        if (!played.All(c => c.Rank == triggerRank)) return false;
+        return played.Count <= 2;
     }
 
     private int GetRequiredSixStopCount()
@@ -3312,8 +3346,10 @@ public class GameManager : MonoBehaviour
     {
         if (original == null || original.Count == 0) return new List<Card>();
 
-        var realCards = original.Where(c => !c.IsJoker()).OrderBy(c => c.Rank).ToList();
-        int jokerCount = original.Count - realCards.Count;
+        var realCards = original
+                    .Where(c => !c.IsJoker())
+                    .OrderBy(c => NormalizeStairRank(c.Rank))
+                    .ToList(); int jokerCount = original.Count - realCards.Count;
 
         if (jokerCount == 0) return new List<Card>(original);
 
@@ -3340,7 +3376,7 @@ public class GameManager : MonoBehaviour
         }
 
         var effectiveList = new List<Card>();
-        int currentRank = realCards[0].Rank;
+        int currentRank = NormalizeStairRank(realCards[0].Rank);
         effectiveList.Add(realCards[0]);
 
         int realIndex = 1;
@@ -3348,7 +3384,7 @@ public class GameManager : MonoBehaviour
 
         while (realIndex < realCards.Count)
         {
-            int nextRealRank = realCards[realIndex].Rank;
+            int nextRealRank = NormalizeStairRank(realCards[realIndex].Rank);
             int gap = nextRealRank - currentRank - 1;
 
             if (gap > 0)
@@ -3690,7 +3726,7 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void SetPendingEightCutState(List<Card> effectivePlayedCards, GameState state)
+    private void SetPendingEightCutState(List<Card> playedCards, GameState state)
     {
         pendingEightCutTriggered = state.IsEightCut;
         if (!pendingEightCutTriggered)
@@ -3701,8 +3737,8 @@ public class GameManager : MonoBehaviour
             return;
         }
         pendingEightCutKeepTurn = state.KeepTurn;
-        pendingEightCutWindowEligible = IsFourStopWindowEligible(effectivePlayedCards);
-        pendingEightCutRankCount = effectivePlayedCards.Count(c => c.Rank == 8);
+        pendingEightCutWindowEligible = IsFourStopWindowEligible(playedCards);
+        pendingEightCutRankCount = playedCards.Count(c => c.Rank == 8);
     }
 
     private IEnumerator HandlePendingEightCut()

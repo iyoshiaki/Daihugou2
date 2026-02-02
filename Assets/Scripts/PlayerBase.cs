@@ -60,6 +60,15 @@ public abstract class PlayerBase
     // ==============================
     // 🔷 階段判定
     // ==============================
+    protected static int NormalizeStairRank(int rank)
+    {
+        return rank switch
+        {
+            1 => 14,
+            2 => 15,
+            _ => rank
+        };
+    }
     private bool IsStair(List<Card> cards)
     {
         if (SoloRuleSettings.IsSoloModeActive && !SoloRuleSettings.GetRuleEnabled("Stair"))
@@ -71,11 +80,11 @@ public abstract class PlayerBase
         if (cards.Any(c => c.Suit != suit))
             return false;
 
-        var sorted = cards.OrderBy(c => c.Rank).ToList();
+        var sorted = cards.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
 
         for (int i = 1; i < sorted.Count; i++)
         {
-            if (sorted[i].Rank != sorted[i - 1].Rank + 1)
+            if (NormalizeStairRank(sorted[i].Rank) != NormalizeStairRank(sorted[i - 1].Rank) + 1)
                 return false;
         }
 
@@ -126,9 +135,9 @@ public abstract class PlayerBase
 
             case CardGroupType.Stair:
                 // 階段出しは最大ランク（末尾）で比較
-                var mySorted = cardsToCheck.OrderBy(c => c.Rank).ToList();
-                var tableSorted = tableCards.OrderBy(c => c.Rank).ToList();
-                return mySorted.Last().Rank > tableSorted.Last().Rank;
+                var mySorted = cardsToCheck.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
+                var tableSorted = tableCards.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
+                return NormalizeStairRank(mySorted.Last().Rank) > NormalizeStairRank(tableSorted.Last().Rank);
 
             default:
                 return false;

@@ -88,7 +88,7 @@ public class HumanPlayer : PlayerBase
         var suitGroups = Hand.GroupBy(c => c.Suit);
         foreach (var sg in suitGroups)
         {
-            var sorted = sg.OrderBy(c => c.Rank).ToList();
+            var sorted = sg.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
             for (int i = 0; i < sorted.Count - 2; i++)
             {
                 // 3枚と4枚の階段を探す

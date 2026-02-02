@@ -50,7 +50,7 @@ public class CpuPlayer : PlayerBase
 
         foreach (var suitGroup in suitGroups)
         {
-            var sorted = suitGroup.OrderBy(c => c.Rank).ToList();
+            var sorted = suitGroup.OrderBy(c => NormalizeStairRank(c.Rank)).ToList();
 
             for (int i = 0; i < sorted.Count - 2; i++)
             {
