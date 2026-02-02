@@ -53,7 +53,7 @@ public class GameManager : MonoBehaviour
 
 
     // 4回戦の設定
-    private const int TotalGames = 1;
+    private const int TotalGames = 4;
     private int currentGameCount = 1;
     private Dictionary<PlayerBase, int> totalPoints = new(); // 累計スコア
 
@@ -1569,7 +1569,7 @@ public class GameManager : MonoBehaviour
         }
         if (IsElevenSilenceActive)
         {
-            labels.Add("11静寂");
+            labels.Add("1サイレンス");
         }
         if (IsJokerStopActive)
         {
@@ -1577,7 +1577,7 @@ public class GameManager : MonoBehaviour
         }
         if (isNineForceActive)
         {
-            labels.Add("9強制");
+            labels.Add("9フォース");
         }
         if (pendingEightCutCount > 0)
         {
@@ -1605,11 +1605,11 @@ public class GameManager : MonoBehaviour
         }
         if (isSixTradeMode)
         {
-            labels.Add("6交換");
+            labels.Add("6トレード");
         }
         if (isFreezeTwelveMode)
         {
-            labels.Add("12凍結");
+            labels.Add("フリーズTHE12");
         }
         if (isSuitLockTurnActive && suitLockSuits.Count > 0)
         {
@@ -2905,6 +2905,7 @@ public class GameManager : MonoBehaviour
         pendingTwoCount = 0;
         ResetBindState();
         ClearSuitLockOnFieldClear();
+        ClearPassMessage();
         pendingEightCutTriggered = false;
         pendingEightCutKeepTurn = false;
         pendingEightCutWindowEligible = false;
@@ -3770,6 +3771,7 @@ public class GameManager : MonoBehaviour
             isNineForceActive = false;
             ResetBindState();
             ClearSuitLockOnFieldClear();
+            ClearPassMessage();
             ConsumeElevenSilenceField();
 
             if (pendingEightCutKeepTurn && remainingPlayers.Contains(players[currentTurnIndex]))
