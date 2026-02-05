@@ -1232,7 +1232,7 @@ public class GameManager : MonoBehaviour
         remainingPlayers = new List<PlayerBase>(players);
         InitializeFirstPlaceCounts();
         currentGameCount = 1;
-        currentTurnIndex = GetStartIndexFromPlayer(FindClubThreeHolder());
+        currentTurnIndex = GetStartIndexFromPlayer(human);
         AssignRankTextReferences();
         UpdateCpuHeaderText();
         UpdatePreviousRankText();
@@ -1916,11 +1916,46 @@ public class GameManager : MonoBehaviour
             index++;
         }
 
+        EnsureHumanHasStartingRanks(new HashSet<int> { 6, 12 });
         PopulateCpuHandAsBack(handAreaCPU1, cpuPlayers[0].Hand.Count);
         PopulateCpuHandAsBack(handAreaCPU2, cpuPlayers[1].Hand.Count);
         PopulateCpuHandAsBack(handAreaCPU3, cpuPlayers[2].Hand.Count);
     }
+    private void EnsureHumanHasStartingRanks(HashSet<int> requiredRanks)
+    {
+        if (human == null || requiredRanks == null || requiredRanks.Count == 0)
+        {
+            return;
+        }
 
+        foreach (var rank in requiredRanks)
+        {
+            if (human.Hand.Any(card => card.Rank == rank))
+            {
+                continue;
+            }
+
+            var donorCard = cpuPlayers
+                .SelectMany(cpu => cpu.Hand)
+                .FirstOrDefault(card => card.Rank == rank);
+            if (donorCard == null)
+            {
+                continue;
+            }
+
+            var donorPlayer = cpuPlayers.First(cpu => cpu.Hand.Contains(donorCard));
+            var swapCard = human.Hand.FirstOrDefault(card => !requiredRanks.Contains(card.Rank)) ?? human.Hand.FirstOrDefault();
+            if (swapCard == null)
+            {
+                return;
+            }
+
+            donorPlayer.Hand.Remove(donorCard);
+            human.Hand.Add(donorCard);
+            human.Hand.Remove(swapCard);
+            donorPlayer.Hand.Add(swapCard);
+        }
+    }
     List<Card> CreateDeck()
     {
         var deck = new List<Card>();
@@ -5728,7 +5763,7 @@ public class GameManager : MonoBehaviour
 
         foreach (var p in players) p.Hand.Clear();
         DealInitialCards();
-        clubThreeHolderBeforeTrade = FindClubThreeHolder();
+        clubThreeHolderBeforeTrade = human;
 
         if (TryTriggerTenhouChihoStart())
         {
@@ -5740,7 +5775,7 @@ public class GameManager : MonoBehaviour
         CreatePlayerCardSlots(human.Hand.Count);
         PopulatePlayerHand(human);
 
-        currentTurnIndex = GetStartIndexFromPlayer(clubThreeHolderBeforeTrade);
+        currentTurnIndex = GetStartIndexFromPlayer(human);
 
         yield return new WaitForSeconds(1.0f);
         StartTurn();
