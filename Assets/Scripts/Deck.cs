@@ -10,7 +10,14 @@ public class Deck
     public Deck()
     {
         foreach (Suit s in System.Enum.GetValues(typeof(Suit)))
-            for (int r = 3; r <= 15; r++) cards.Add(new Card(s, r));
+        {
+            if (s == Suit.Joker) continue;
+            for (int r = 3; r <= 15; r++)
+            {
+                cards.Add(new Card(s, r));
+            }
+        }
+        cards.Add(Card.CreateJoker());
     }
     public void Shuffle()
     {

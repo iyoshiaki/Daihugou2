@@ -32,7 +32,7 @@ public class Card
     }
     public bool IsJoker()
     {
-        return Suit == Suit.Joker || Rank == 99;
+        return Suit == Suit.Joker || Rank == 16 || Rank == 99;
     }
 
     public int GetStrength()
@@ -45,7 +45,7 @@ public class Card
         return new Card
         {
             Suit = Suit.Joker,
-            Rank = 99,                     // 特殊ランクとして99を設定
+            Rank = 16,                     // GameManagerの強さ判定と揃える
             SpritePath = "Images/Joker"     //Joker 画像が必要
         };
     }

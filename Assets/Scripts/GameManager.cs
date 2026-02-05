@@ -200,10 +200,13 @@ public class GameManager : MonoBehaviour
     {
         // 通常時: 3 < 4 ... < 13(K) < 1(A) < 2 < 16(Joker)
         // 内部データ: 3=3 ... 13=13, 14=A, 15=2, 16
+        if (rank == 16)
+        {
+            return 14; // Jokerは革命中でも最強扱い
+        }
 
         int power = 0;
-        if (rank == 16) power = 14; // Joker (最強)
-        else if (rank == 15) power = 13; // 2
+        if (rank == 15) power = 13; // 2
         else if (rank == 14) power = 12; // A
         else power = rank - 3; // 3 => 0, 4 => 1 ... 13(K) => 10
 
@@ -284,6 +287,11 @@ public class GameManager : MonoBehaviour
 
         isSingleOnlyTurn = forceSingleNextTurn;
         forceSingleNextTurn = false;
+
+        if (isSingleOnlyTurn)
+        {
+            EnqueueMessage("4シングル中: 今回のターンは1枚出しのみ!");
+        }
 
         passButton.interactable = currentTurnIndex == 0;
 
@@ -1633,7 +1641,7 @@ public class GameManager : MonoBehaviour
         }
         if (IsElevenSilenceActive)
         {
-            labels.Add("1サイレンス");
+            labels.Add("11サイレンス");
         }
         if (IsJokerStopActive)
         {
@@ -4563,7 +4571,7 @@ public class GameManager : MonoBehaviour
         else
         {
             // CPUの場合はエンキューで表示
-            EnqueueMessage($"CPUがカードを選んでいます...");
+            // EnqueueMessage($"CPUがカードを選んでいます...");
             yield return new WaitForSeconds(1.0f);
 
             var hand = player.Hand.OrderBy(c => c.Rank).ToList();
