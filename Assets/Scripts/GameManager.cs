@@ -121,6 +121,7 @@ public class GameManager : MonoBehaviour
 
     private bool forceSingleNextTurn = false;
     private bool isSingleOnlyTurn = false;
+    private bool carrySingleOnlyOnNextClear = false;
 
     // ★ 革命状態フラグ
     private bool isRevolution = false;
@@ -1690,7 +1691,7 @@ public class GameManager : MonoBehaviour
         }
         if (isSingleOnlyTurn)
         {
-            labels.Add("単発のみ");
+            labels.Add("4シングル");
         }
 
         return labels;
@@ -2600,7 +2601,6 @@ public class GameManager : MonoBehaviour
         var state = new GameState(new List<Card>(lastPlayedCards), currentTurnIndex);
 
         bool isElevenSilenceActive = IsElevenSilenceActive;
-
         if (isElevenSilenceActive)
         {
             state.IsElevenSilence = true;
@@ -2863,6 +2863,7 @@ public class GameManager : MonoBehaviour
 
         if (passCount >= requiredPasses)
         {
+            carrySingleOnlyOnNextClear = true;
             StartCoroutine(ClearTableAndRestart());
         }
         else
@@ -2949,6 +2950,7 @@ public class GameManager : MonoBehaviour
 
         if (passCount >= requiredPasses)
         {
+            carrySingleOnlyOnNextClear = true;
             StartCoroutine(ClearTableAndRestart());
         }
         else
@@ -2960,6 +2962,11 @@ public class GameManager : MonoBehaviour
     private IEnumerator ClearTableAndRestart()
     {
         yield return new WaitForSeconds(0.6f);
+
+        bool shouldCarrySingleOnly = forceSingleNextTurn
+            || IsFourSingleTrigger(lastPlayedCards)
+            || (carrySingleOnlyOnNextClear && isSingleOnlyTurn);
+        carrySingleOnlyOnNextClear = false;
 
         foreach (Transform child in tableArea) Destroy(child.gameObject);
 
@@ -2983,6 +2990,7 @@ public class GameManager : MonoBehaviour
         pendingEightCutWindowEligible = false;
         pendingEightCutRankCount = 0;
         ConsumeElevenSilenceField();
+        forceSingleNextTurn = shouldCarrySingleOnly;
 
         if (lastPlayedPlayerIndex < 0) lastPlayedPlayerIndex = 0;
 
@@ -3114,6 +3122,10 @@ public class GameManager : MonoBehaviour
     {
         if (played == null || played.Count == 0) return false;
         return played.Any(c => c.Rank == 8);
+    }
+    private bool IsFourSingleTrigger(List<Card> played)
+    {
+        return played != null && played.Count == 1 && played[0].Rank == 4;
     }
     private bool IsFourStopWindowEligible(List<Card> played)
     {
@@ -5094,6 +5106,7 @@ public class GameManager : MonoBehaviour
         jokerStopTurnsRemaining = 0;
         forceSingleNextTurn = false;
         isSingleOnlyTurn = false;
+        carrySingleOnlyOnNextClear = false;
         elevenSilenceFieldsRemaining = 0;
         isNineForceActive = false;
         pendingEightCutTriggered = false;
