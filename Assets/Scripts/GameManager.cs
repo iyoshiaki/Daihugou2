@@ -337,8 +337,6 @@ public class GameManager : MonoBehaviour
             ConsumeSuitLockTurn();
         }
 
-        ConsumeJokerStopTurn();
-
         // --- 1. 8切りなどで「もう一度自分のターン」の場合 ---
         if (skipTurnAdvance)
         {
@@ -1187,7 +1185,7 @@ public class GameManager : MonoBehaviour
         return ranks[0] == 3 && ranks[1] == 4 && ranks[2] == 5;
     }
 
-    private void ConsumeJokerStopTurn()
+    private void ConsumeJokerStopField()
     {
         if (jokerStopTurnsRemaining > 0)
         {
@@ -2985,6 +2983,7 @@ public class GameManager : MonoBehaviour
         ResetBindState();
         ClearSuitLockOnFieldClear();
         ClearPassMessage();
+        ConsumeJokerStopField();
         pendingEightCutTriggered = false;
         pendingEightCutKeepTurn = false;
         pendingEightCutWindowEligible = false;
@@ -3858,6 +3857,7 @@ public class GameManager : MonoBehaviour
             ResetBindState();
             ClearSuitLockOnFieldClear();
             ClearPassMessage();
+            ConsumeJokerStopField();
             ConsumeElevenSilenceField();
 
             if (pendingEightCutKeepTurn && remainingPlayers.Contains(players[currentTurnIndex]))
